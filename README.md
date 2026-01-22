@@ -1,18 +1,63 @@
-# Smart-Investment-stretegy
+# Smart-Investment-Strategy｜Radar 戰情室 MVP
 
-以微服務為核心的智慧投資系統骨架，支援 Vue 前端、FastAPI 後端、Postgres 資料庫與 Docker Compose 一鍵啟動。此版本著重於乾淨的基礎設計與健康檢查，方便後續透過 Claude、Aider 或人工同步開發。
+以微服務為核心的智慧投資戰情室骨架，支援 Vue（Vite）前端、FastAPI 後端、Postgres 資料庫與 Docker Compose 一鍵啟動。此專案目標為：自動同步持倉與交易 → 套用 Radar v1.4 分析曝險與趨勢 → 整合新聞與研究報告 → 保存每次建議與策略紀錄，並以 RWD 戰情室介面呈現。
+
+---
+
+## MVP 範圍
+
+### In Scope（MVP 必含）
+- ✅ 簡易登入（JWT，MVP 先不做 OAuth）
+- ✅ 持倉/交易同步：啟動時讀取 Google Sheets（持倉表單 + 流水帳交易紀錄）
+- ✅ 資料落庫（Postgres）：
+	- 交易紀錄 `trades`
+	- 持倉快照 `positions_snapshot`
+	- 指標值 `indicator_values`（例如 `RS_XLU_XLK`）
+	- 新聞訊號 `news_signals`
+	- 研究訊號 `research_signals`
+	- 每次分析與建議紀錄 `analysis_runs` / `recommendations`
+- ✅ 均價法盈虧計算（依交易流水帳推導平均成本）
+- ✅ Radar v1.4 策略引擎（可抽換）：
+	- 策略邏輯封裝於 Strategy Engine + 插件
+	- 趨勢過熱 + 回撤 >10% + 核心持股仍盈利 → 獲利減碼 30%
+	- 趨勢反轉 → 獲利減碼 70%
+- ✅ `RS_XLU_XLK` 指標（日線）作為市場風格/風險偏好參考
+- ✅ 新聞（N1 + N3）：GDELT + RSS 白名單，輸出中文解讀並標註重要性
+- ✅ 研究報告：
+	- 國泰研究報告頁面自動抓取（每日/週報 PDF）→ 文字抽取 → 本地摘要（中文）
+	- 券商研究手動匯入（國泰證券 + 凱基證券）
+- ✅ 戰情室 UI（RWD）：
+	- 持倉比例/分類/曝險
+	- 今日訊號（新聞/研究）
+	- 策略建議與歷史建議對照
+- ✅ VM 部署（D1）：
+	- Ubuntu VM + Docker Compose
+	- GitHub Actions（push → SSH → VM 自動更新部署）
+	- systemd timer 保底（每 15 分鐘檢查更新）
+
+### Out of Scope（MVP 不做）
+- ❌ 掃描型 PDF OCR（僅標記 `needs_ocr`，下一版再做）
+- ❌ 研究報告全文公開轉載/對外分享（僅存連結、摘要與解讀，需遵守來源條款）
+- ❌ 高頻/即時 tick 資料
+- ❌ Kubernetes（MVP 以 VM + Docker Compose 為主）
+
+---
 
 ## 系統組成
 
 | 服務 | 說明 | 預設內部埠口 |
 | --- | --- | --- |
-| Frontend | Vite + Vue 空殼，提供介面雛型與 Vitest 測試 | 4173 (對外 8080) |
-| api-gateway / web-bff | FastAPI，統一前端進出入口 | 8000 |
-| portfolio-service | FastAPI，負責投資組合資料 | 8001 |
-| radar-service | FastAPI，未來專注技術指標計算 | 8002 |
-| news-service | FastAPI，新聞與訊息彙整 | 8003 |
-| research-service | FastAPI，研究報告與洞察 | 8004 |
-| postgres | 官方 Postgres 16，持久化儲存 | 5432 |
+| Frontend | Vite + Vue 戰情室介面雛型，含 Vitest | 4173（對外 8080） |
+| api-gateway / web-bff | FastAPI，統一前端入口、Auth、聚合資料 | 8000 |
+| portfolio-service | FastAPI，交易/持倉/均價法/快照 | 8001 |
+| radar-service | FastAPI，Radar v1.4 策略引擎（可抽換） | 8002 |
+| news-service | FastAPI，新聞抓取/去重/中文摘要/重要性分數 | 8003 |
+| research-service | FastAPI，研究報告抓取（PDF）/抽字/本地摘要/手動匯入 | 8004 |
+| postgres | Postgres 16，持久化儲存 | 5432 |
+
+更完整架構、資料契約與邊界請見 [ARCHITECTURE.md](ARCHITECTURE.md)、[API_CONTRACTS.md](API_CONTRACTS.md)、[Strategy.md](Strategy.md)。
+
+---
 
 ## 目錄結構
 
@@ -20,6 +65,7 @@
 .
 ├── docker-compose.yml
 ├── Makefile
+├── .env.example
 ├── frontend/
 │   ├── Dockerfile
 │   ├── package.json
@@ -29,43 +75,48 @@
 │   │   └── main.js
 │   └── tests/health.test.js
 └── services/
-	 ├── base-requirements.txt
-	 ├── api-gateway/
-	 │   ├── Dockerfile
-	 │   ├── app/main.py
-	 │   └── tests/test_health.py
-	 └── … (portfolio, radar, news, research 結構相同)
+		├── base-requirements.txt
+		├── api-gateway/
+		│   ├── Dockerfile
+		│   ├── app/main.py
+		│   └── tests/test_health.py
+		└── …（portfolio、radar、news、research 結構相同）
 ```
 
+---
+
 ## 環境需求
-
 - Docker / Docker Compose
-- Node.js 20 (本機開發前端時使用)
-- Python 3.12 (如需在本機直接執行 FastAPI 測試)
-- Claude 與 Aider：請閱讀 [RUNBOOK-AI-GUARDRAILS](RUNBOOK-AI-GUARDRAILS) 以遵守協作守則
+- Node.js 20（本機開發前端時使用）
+- Python 3.12（如需在本機直接執行 FastAPI 測試）
+- Claude 與 Aider：請閱讀 [RUNBOOK-AI-GUARDRAILS](RUNBOOK-AI-GUARDRAILS)，遵守協作守則（列出修改檔案、保持最小差異、務必附測試）
 
-## 快速開始
+---
 
+## 快速開始（Codespaces / 本機）
 1. 複製環境變數範本並視需求調整：
-	```bash
-	cp .env.example .env
-	```
+	 ```bash
+	 cp .env.example .env
+	 ```
 2. 安裝前端依賴（開發模式需要）：
-	```bash
-	make install-frontend
-	```
+	 ```bash
+	 make install-frontend
+	 ```
 3. 透過 Docker Compose 啟動所有服務：
-	```bash
-	make docker-up
-	```
+	 ```bash
+	 make docker-up
+	 ```
 4. 驗證健康檢查：
-	- 前端：http://localhost:8080
-	- API：http://localhost:8000/health (其餘服務依序遞增)
+	 - 前端：http://localhost:8080
+	 - API Gateway：http://localhost:8000/health
+	 - 其他服務：8001～8004 皆有 `/health`
 
-若需停止並清除資源：
+停止並清除資源：
 ```bash
 make docker-down
 ```
+
+---
 
 ## 常用 Makefile 指令
 
@@ -78,22 +129,56 @@ make docker-down
 | `make docker-down` | `docker compose down -v` |
 | `make docker-logs` | 追蹤所有容器日誌 |
 
+---
+
+## VM 部署（D1｜Ubuntu + Docker Compose）
+
+MVP 採用 VM 部署並支援 GitHub push 自動更新：
+- VM 初次安裝/啟動：`infra/vm/bootstrap.sh`
+- 自動部署流水：
+	- GitHub Actions：push 觸發 → SSH 到 VM → 執行 `infra/vm/deploy.sh`
+	- systemd timer：每 15 分鐘保底檢查更新
+
+詳細步驟請見 [DEPLOYMENT.md](DEPLOYMENT.md) 與 [RUNBOOK.md](RUNBOOK.md)。
+
+---
+
 ## 健康檢查端點
 
-每個 FastAPI 服務都提供 `/health`，回傳 `{ "status": "ok", "service": "<name>" }`，方便雲端部署或監控探活。前端也提供簡單的狀態面板，可在未連線後端時顯示預設訊息。
+每個 FastAPI 服務都提供 `/health`，回傳：
 
-## 測試策略
+```json
+{ "status": "ok", "service": "<name>" }
+```
 
-- **前端**：使用 Vitest，範例測試位於 `frontend/tests/health.test.js`
-- **後端**：每個服務的 `tests/test_health.py` 皆會驗證 `/health` 狀態碼與 JSON 結構
-- **CI/CD**：可直接將上述 Makefile 指令串入 pipeline
+方便雲端部署或監控探活。
 
-## 與 AI 協同開發
+---
 
-- 所有註解與手冊以中文撰寫，方便團隊協作
-- 以 Claude、Aider 作為受約束的協作工程師，務必遵循 [RUNBOOK-AI-GUARDRAILS](RUNBOOK-AI-GUARDRAILS) 中的規範（列出修改檔案、保持最小差異、務必附測試等）
-- 新增服務或功能時，請優先補齊健康檢查與測試確保骨架穩定
+## 測試策略（MVP）
+- 前端：Vitest（範例測試：`frontend/tests/health.test.js`）
+- 後端：各服務 `tests/test_health.py` 驗證 `/health` 狀態碼與 JSON 結構
+- CI/CD：可直接將 Makefile 指令串入 pipeline，詳見 `TESTING.md`
 
-## 授權
+---
 
-詳見 [LICENSE](LICENSE)
+## 與 AI 協同開發（重要）
+- 所有註解與文件以繁體中文撰寫
+- 使用 Claude / Aider 時必須：
+	- 先列出會修改的檔案
+	- 保持最小差異，避免無意義大改
+	- 每次變更需附對應測試並更新文件
+- 詳細規範請見 [RUNBOOK-AI-GUARDRAILS](RUNBOOK-AI-GUARDRAILS)
+
+---
+
+## 重要文件
+- [Strategy.md](Strategy.md)：Radar v1.4 規則、抽換邊界與指標定義
+- [Development.md](Development.md)：分階段 prompts、開發流程、一鍵命令模板
+- [ARCHITECTURE.md](ARCHITECTURE.md)：微服務邊界、資料流、部署拓樸
+- [RUNBOOK.md](RUNBOOK.md)：維運、監控、回滾、日誌、備份
+- [SECURITY.md](SECURITY.md)：金鑰與安全控管原則
+- [API_CONTRACTS.md](API_CONTRACTS.md)：`news_signals` / `research_signals` / `analysis_runs` schema
+- [TESTING.md](TESTING.md)：前後端測試策略與命令
+- [DEPLOYMENT.md](DEPLOYMENT.md)：VM 部署與自動更新
+- [CHANGELOG.md](CHANGELOG.md)：版本沿革與 MVP 里程碑

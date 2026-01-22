@@ -1,3 +1,83 @@
+# RUNBOOK.md｜維運指南（MVP）
+
+本文件提供 VM 上的維運人員、資料與策略工程師在遇到故障時的標準作業流程（SOP），包含日常檢查、異常排查、重啟/回滾、備份與 AI 協作注意事項。
+
+## 1. 日常檢查清單
+
+1. `docker ps --format 'table {{.Names}}\t{{.Status}}'`（所有容器須為 healthy）
+2. `curl http://localhost:8000/health`（Gateway 探活）
+3. `curl http://localhost:8001/health` ~ `8004/health`（抽樣）
+4. `journalctl -u radar-auto-update.timer -n 30`
+5. `docker exec postgres pg_isready`
+6. 檢查最新 `recommendations`、`news_signals` 是否更新（可透過 SQL 或 API）
+
+## 2. 異常排查對照表
+
+| 症狀 | 可能原因 | 處理步驟 |
+| --- | --- | --- |
+| 前端空白或 5xx | Gateway 掛掉 / JWT 失效 | `docker logs api-gateway` → `docker restart api-gateway` |
+| Radar 無建議輸出 | 指標未更新 / 策略崩潰 | 1. `docker logs radar-service` 2. 確認 `indicator_values` 是否含最新 `RS_XLU_XLK` |
+| 新聞/研究訊號缺漏 | GDELT/RSS 限制 | 重啟對應服務並檢查 API 金鑰 |
+| Postgres 空間不足 | 快照過多 | `docker exec postgres du -sh /var/lib/postgresql/data` → 清理舊備份或擴容 |
+| docker compose up 失敗 | `.env` 缺值或埠被占用 | 1. 驗證 `.env` 2. `docker compose config` 3. 釋放埠號 |
+
+## 3. 重啟與回滾
+
+- 重啟單一服務：`docker compose restart <service>`
+- 全體重啟：`make docker-down && make docker-up`
+- 回滾流程：
+	1. `git fetch --all`
+	2. `git checkout <previous-tag>`
+	3. `make docker-up`
+	4. 驗證 `/health` 與前端 UI
+	5. 在 Issue/PR 記錄原因與後續行動
+
+## 4. 備份策略
+
+- Postgres：
+	- 每日 02:00 `pg_dump` 至 `/var/backups/radar/<date>.sql`
+	- 每週同步至物件儲存（S3/GCS）
+- `.env`、systemd 服務檔：存於 `/etc/radar/` 並納入私有備份 repo。
+- 關鍵表：`recommendations`, `analysis_runs`, `news_signals`, `research_signals` 需月度冷備。
+
+## 5. systemd timer（保底部署）
+
+- Service：`/etc/systemd/system/radar-auto-update.service`
+- Timer：`/etc/systemd/system/radar-auto-update.timer`
+- 功能：每 15 分鐘執行 `infra/vm/deploy.sh --auto`，若 GitHub Actions 部署失敗仍可更新。
+- 常用指令：
+	- `systemctl status radar-auto-update.timer`
+	- `journalctl -u radar-auto-update.service -f`
+
+## 6. AI 協作者（Claude / Aider）守則
+
+1. 修改前列出檔案與區塊。
+2. 嚴守最小差異（Minimal Diff）。
+3. 每次變更附測試證明（pytest、Vitest 或 curl log）。
+4. 不得將金鑰、私密內容貼給 AI；以 placeholder 表示。
+5. 完成後請人工檢查 `git diff` 才能合併。
+
+## 7. 緊急聯絡（Placeholder）
+
+| 類型 | 聯絡方式 |
+| --- | --- |
+| DevOps Oncall | devops@example.com |
+| Strategy Owner | strategy@example.com |
+| Data Ops | dataops@example.com |
+
+## 8. 常用指令速查
+
+```bash
+# 查看所有服務日誌
+make docker-logs
+
+# 手動重新部署（VM 上）
+git pull origin main
+make docker-up
+
+# 匯出 Postgres 備份
+docker exec postgres pg_dump -U investment investment_db > backups/$(date +%F).sql
+```
 好，下面這一份是可直接放進 repo、可直接 commit 的正式版 RUNBOOK.md（安裝與驗證篇）。
 我用的是「工程交接等級」的寫法，不是教學文，重點是 可重現、可驗證、可排錯。
 
