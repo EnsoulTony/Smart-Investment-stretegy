@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+#!/bin/bash
+set -e  # 只要任何一個指令失敗，立即停止並回報錯誤
+set -x  # 顯示執行的指令內容，方便除錯
 set -euo pipefail
 
 APP_DIR="/opt/radar-warroom/Smart-Investment-stretegy"
@@ -17,6 +20,13 @@ echo "${PREV_COMMIT}" > "${PREV_FILE}"
 
 git fetch --all --prune
 git reset --hard origin/main
+
+# 新增這兩行來除錯
+echo "=== Debug Info ==="
+git remote -v           # 確認連的是哪個 Repo
+git log -1 --oneline    # 確認重置後的最新 Commit 是哪一個
+echo "=================="
+
 
 docker compose build
 docker compose up -d
