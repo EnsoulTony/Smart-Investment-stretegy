@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { formatHealthStatus } from "../src/lib/health.js";
+import { formatHealthStatus } from "../lib/health.js";
 
 // 驗證健康訊息格式化工具可提供穩定的輸出。
 describe("formatHealthStatus", () => {
