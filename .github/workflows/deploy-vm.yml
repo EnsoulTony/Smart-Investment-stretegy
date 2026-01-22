@@ -13,12 +13,30 @@ jobs:
 
       - name: Setup SSH key
         run: |
-          if [ -z "${{ secrets.VM_SSH_HOST }}" ] || [ -z "${{ secrets.VM_SSH_PORT }}" ] || [ -z "${{ secrets.VM_SSH_USER }}" ] || [ -z "${{ secrets.VM_SSH_KEY }}" ]; then
-            echo "Missing one or more required secrets: VM_SSH_HOST, VM_SSH_PORT, VM_SSH_USER, VM_SSH_KEY"
+          if [ -z "${{ secrets.VM_SSH_HOST }}" ] || [ -z "${{ secrets.VM_SSH_PORT }}" ] || [ -z "${{ secrets.VM_SSH_USER }}" ]; then
+            echo "Missing one or more required secrets: VM_SSH_HOST, VM_SSH_PORT, VM_SSH_USER"
             exit 1
           fi
+
           mkdir -p ~/.ssh
-          printf '%s' "${{ secrets.VM_SSH_KEY }}" > ~/.ssh/id_rsa
+
+          KEY_B64="${{ secrets.VM_SSH_KEY_B64 }}"
+          KEY_RAW="${{ secrets.VM_SSH_KEY }}"
+
+          if [ -n "$KEY_B64" ]; then
+            echo "Writing SSH key from VM_SSH_KEY_B64 (base64)."
+            if ! printf '%s' "$KEY_B64" | base64 -d > ~/.ssh/id_rsa; then
+              echo "Failed to decode VM_SSH_KEY_B64"
+              exit 1
+            fi
+          elif [ -n "$KEY_RAW" ]; then
+            echo "Writing SSH key from VM_SSH_KEY."
+            printf '%s' "$KEY_RAW" | tr -d '\r' > ~/.ssh/id_rsa
+          else
+            echo "Missing SSH key secret: provide VM_SSH_KEY_B64 (preferred) or VM_SSH_KEY."
+            exit 1
+          fi
+
           chmod 600 ~/.ssh/id_rsa
           ssh-keyscan -p "${{ secrets.VM_SSH_PORT }}" -H "${{ secrets.VM_SSH_HOST }}" >> ~/.ssh/known_hosts
 
