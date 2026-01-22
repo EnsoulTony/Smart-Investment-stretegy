@@ -21,7 +21,7 @@ jobs:
       - name: Deploy
         run: |
           set -o pipefail
-          ssh -i ~/.ssh/id_rsa -p "${{ secrets.VM_SSH_PORT }}" "${{ secrets.VM_USER }}@${{ secrets.VM_HOST }}" "bash /opt/radar-warroom/infra/vm/deploy.sh" | tee deploy.log
+          ssh -i ~/.ssh/id_rsa -p "${{ secrets.VM_SSH_PORT }}" "${{ secrets.VM_SSH_USER }}@${{ secrets.VM_SSH_HOST }}" "bash /opt/radar-warroom/infra/vm/deploy.sh" | tee deploy.log
 
       - name: Deploy log summary (on failure)
         if: failure()
