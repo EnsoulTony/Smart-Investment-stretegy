@@ -32,3 +32,4 @@ jobs:
           else
             echo "No deploy log captured."
           fi
+
