@@ -16,12 +16,12 @@ jobs:
           mkdir -p ~/.ssh
           printf '%s' "${{ secrets.VM_SSH_KEY }}" > ~/.ssh/id_rsa
           chmod 600 ~/.ssh/id_rsa
-          ssh-keyscan -H "${{ secrets.VM_SSH_HOST }}" >> ~/.ssh/known_hosts
+          ssh-keyscan -H "${{ secrets.VM_HOST }}" >> ~/.ssh/known_hosts
 
       - name: Deploy
         run: |
           set -o pipefail
-          ssh -i ~/.ssh/id_rsa -p "${{ secrets.VM_SSH_PORT }}" "${{ secrets.VM_SSH_USER }}@${{ secrets.VM_SSH_HOST }}" "bash /opt/radar-warroom/infra/vm/deploy.sh" | tee deploy.log
+          ssh -i ~/.ssh/id_rsa -p "${{ secrets.VM_SSH_PORT }}" "${{ secrets.VM_USER }}@${{ secrets.VM_HOST }}" "bash /opt/radar-warroom/Smart-Investment-stretegy/infra/vm/deploy.sh" | tee deploy.log
 
       - name: Deploy log summary (on failure)
         if: failure()

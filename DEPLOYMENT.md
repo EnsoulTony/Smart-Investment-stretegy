@@ -7,20 +7,20 @@
 1. 建立 Ubuntu 22.04 VM（建議 4 vCPU / 8 GB RAM / 100 GB SSD）。
 2. 以 root 執行 bootstrap（會安裝 Docker、Compose plugin、Git，並建立 `/opt/radar-warroom`）：
   ```bash
-  sudo bash /opt/radar-warroom/infra/vm/bootstrap.sh
+  sudo bash /opt/radar-warroom/Smart-Investment-stretegy/infra/vm/bootstrap.sh
   ```
-  如果是新機器，請先將 repo 放到 `/opt/radar-warroom` 或改用下列方式：
+  如果是新機器，請先將 repo 放到 `/opt/radar-warroom/Smart-Investment-stretegy` 或改用下列方式：
   ```bash
   sudo mkdir -p /opt/radar-warroom
-  sudo git clone https://github.com/EnsoulTony/Smart-Investment-stretegy.git /opt/radar-warroom
-  sudo bash /opt/radar-warroom/infra/vm/bootstrap.sh
+  sudo git clone https://github.com/EnsoulTony/Smart-Investment-stretegy.git /opt/radar-warroom/Smart-Investment-stretegy
+  sudo bash /opt/radar-warroom/Smart-Investment-stretegy/infra/vm/bootstrap.sh
   ```
 3. 首次執行後請登出再登入（套用 docker 群組權限）。
 4. `.env` 會從 `.env.example` 建立，請填入必要機密資訊。
 
 ## 2. GitHub Actions → SSH 自動部署
 
-- 部署腳本：`/opt/radar-warroom/infra/vm/deploy.sh`
+- 部署腳本：`/opt/radar-warroom/Smart-Investment-stretegy/infra/vm/deploy.sh`
 - GitHub Actions workflow（摘要）：
   ```yaml
   name: Deploy to VM
@@ -42,7 +42,7 @@
         - name: Deploy
           run: |
             set -o pipefail
-            ssh -i ~/.ssh/id_rsa -p "${{ secrets.VM_SSH_PORT }}" "${{ secrets.VM_USER }}@${{ secrets.VM_HOST }}" "bash /opt/radar-warroom/infra/vm/deploy.sh" | tee deploy.log
+            ssh -i ~/.ssh/id_rsa -p "${{ secrets.VM_SSH_PORT }}" "${{ secrets.VM_USER }}@${{ secrets.VM_HOST }}" "bash /opt/radar-warroom/Smart-Investment-stretegy/infra/vm/deploy.sh" | tee deploy.log
         - name: Deploy log summary (on failure)
           if: failure()
           run: |
@@ -68,8 +68,8 @@
 
   [Service]
   Type=oneshot
-  WorkingDirectory=/opt/radar-warroom
-  ExecStart=/opt/radar-warroom/infra/vm/deploy.sh --auto
+  WorkingDirectory=/opt/radar-warroom/Smart-Investment-stretegy
+  ExecStart=/opt/radar-warroom/Smart-Investment-stretegy/infra/vm/deploy.sh --auto
   ```
 - 建立 timer：`/etc/systemd/system/radar-deploy.timer`
   ```ini
@@ -95,7 +95,7 @@
 
 ```bash
 ssh vm-user@vm-host
-sudo /opt/radar-warroom/infra/vm/deploy.sh
+sudo /opt/radar-warroom/Smart-Investment-stretegy/infra/vm/deploy.sh
 ```
 
 ## 5. 驗證步驟
