@@ -41,7 +41,19 @@ cp .env.example .env
 # - OPENAI_API_KEY: OpenAI API 金鑰 (選用，用於 Aider)
 ```
 
-### 3. Aider 使用
+### 3. 驗證環境設定
+
+```bash
+# 執行環境檢查腳本
+python check_environment.py
+```
+
+此腳本會檢查：
+- Python 版本
+- 必要套件安裝狀態
+- API 金鑰配置狀態
+
+### 4. Aider 使用
 
 Aider 是一個 AI 配對編程工具，可以協助你編寫和修改程式碼。
 
