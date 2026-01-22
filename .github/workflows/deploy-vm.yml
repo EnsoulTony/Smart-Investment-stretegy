@@ -31,7 +31,7 @@ jobs:
             fi
           elif [ -n "$KEY_RAW" ]; then
             echo "Writing SSH key from VM_SSH_KEY."
-            printf '%s' "$KEY_RAW" | tr -d '\r' > ~/.ssh/id_rsa
+            echo "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/id_rsa
           else
             echo "Missing SSH key secret: provide VM_SSH_KEY_B64 (preferred) or VM_SSH_KEY."
             exit 1
