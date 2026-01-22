@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-APP_DIR="/opt/radar-warroom"
+APP_DIR="/opt/radar-warroom/Smart-Investment-stretegy"
 PREV_FILE="${APP_DIR}/.deploy_prev_commit"
 HEALTH_URL="http://localhost:8000/health"
 
