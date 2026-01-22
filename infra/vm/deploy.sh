@@ -27,8 +27,8 @@ git remote -v           # 確認連的是哪個 Repo
 git log -1 --oneline    # 確認重置後的最新 Commit 是哪一個
 echo "=================="
 
-# 停止並移除舊容器，釋放佔用的端口
-docker compose down --remove-orphans
+# 停止並移除舊容器及 volumes，釋放佔用的端口
+docker compose down -v --remove-orphans
 
 docker compose build
 docker compose up -d
