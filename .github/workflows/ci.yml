@@ -10,9 +10,6 @@ jobs:
   frontend-tests:
     name: Frontend - Vitest
     runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: frontend
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -23,9 +20,11 @@ jobs:
           node-version: '20'
 
       - name: Install dependencies
+        working-directory: frontend
         run: npm install --no-fund --no-audit
 
       - name: Run Vitest
+        working-directory: frontend
         run: npm run test -- --run
 
   backend-tests:
