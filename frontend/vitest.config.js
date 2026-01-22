@@ -11,7 +11,6 @@ export default defineConfig({
   test: {
     globals: true,
     environment: "jsdom",
-    include: ["../tests/**/*.test.js"],
-    root: path.resolve(__dirname, "src"),
+    include: ["tests/**/*.test.js"],
   },
 });
