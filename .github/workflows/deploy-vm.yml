@@ -20,24 +20,24 @@ jobs:
 
           mkdir -p ~/.ssh
 
-          KEY_B64="${{ secrets.VM_SSH_KEY_B64 }}"
-          KEY_RAW="${{ secrets.VM_SSH_KEY }}"
-
-          if [ -n "$KEY_B64" ]; then
-            echo "Writing SSH key from VM_SSH_KEY_B64 (base64)."
-            if ! printf '%s' "$KEY_B64" | base64 -d > ~/.ssh/id_rsa; then
-              echo "Failed to decode VM_SSH_KEY_B64"
+          # Try VM_SSH_KEY_B64 first (base64-encoded private key)
+          if [ -n "${{ secrets.VM_SSH_KEY_B64 }}" ]; then
+            echo "Decoding SSH key from VM_SSH_KEY_B64..."
+            if ! printf '%s' "${{ secrets.VM_SSH_KEY_B64 }}" | base64 -d > ~/.ssh/id_rsa 2>&1; then
+              echo "ERROR: Failed to decode VM_SSH_KEY_B64"
               exit 1
             fi
-          elif [ -n "$KEY_RAW" ]; then
-            echo "Writing SSH key from VM_SSH_KEY."
-            echo "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/id_rsa
+          # Fall back to VM_SSH_KEY (raw key, may have newlines)
+          elif [ -n "${{ secrets.VM_SSH_KEY }}" ]; then
+            echo "Using SSH key from VM_SSH_KEY..."
+            printf '%s' "${{ secrets.VM_SSH_KEY }}" > ~/.ssh/id_rsa
           else
-            echo "Missing SSH key secret: provide VM_SSH_KEY_B64 (preferred) or VM_SSH_KEY."
+            echo "ERROR: No SSH key provided. Set either VM_SSH_KEY_B64 or VM_SSH_KEY."
             exit 1
           fi
 
           chmod 600 ~/.ssh/id_rsa
+          echo "SSH key set up successfully."
           ssh-keyscan -p "${{ secrets.VM_SSH_PORT }}" -H "${{ secrets.VM_SSH_HOST }}" >> ~/.ssh/known_hosts
 
       - name: Deploy
