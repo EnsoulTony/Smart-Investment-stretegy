@@ -1,0 +1,20 @@
+# Aider configuration file
+# See https://aider.chat/docs/config.html for all options
+
+# Model configuration
+# model: gpt-4-turbo-preview
+# edit-format: whole
+
+# Git configuration
+auto-commits: true
+dirty-commits: true
+attribute-author: true
+attribute-committer: false
+
+# Chat options
+show-diffs: true
+pretty: true
+stream: true
+
+# File handling
+encoding: utf-8

@@ -1,0 +1,14 @@
+# AI Tools
+aider-chat>=0.40.0
+
+# Data Analysis and Investment Strategy
+pandas>=2.0.0
+numpy>=1.24.0
+matplotlib>=3.7.0
+seaborn>=0.12.0
+
+# API and Web
+requests>=2.31.0
+
+# Utilities
+python-dotenv>=1.0.0
