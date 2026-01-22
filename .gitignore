@@ -58,3 +58,20 @@ logs/
 
 # Jupyter Notebook
 .ipynb_checkpoints
+
+# Node / Frontend
+node_modules/
+frontend/node_modules/
+frontend/dist/
+frontend/.vite/
+*.tsbuildinfo
+
+# Test & coverage artifacts
+.pytest_cache/
+.coverage
+coverage/
+htmlcov/
+.vitest/
+
+# Local Docker overrides
+docker-compose.override.yml

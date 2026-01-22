@@ -1,0 +1,106 @@
+⸻
+
+📎 RUNBOOK-AI-GUARDRAILS.md
+
+AI 工程師行為規範（必讀）
+
+目的：
+把 Claude 當「工程師」，不是聊天機器
+防止誤改、過度重構、偷改邏輯
+
+⸻
+
+Claude Code 的角色定義
+
+Claude Code 在本 repo 中的角色是：
+
+「受約束的協作工程師」
+
+不是：
+	•	❌ 架構師
+	•	❌ 產品經理
+	•	❌ 自由重構者
+
+⸻
+
+🚨 絕對禁止（Hard No）
+
+Claude 不得：
+	•	❌ 修改 Sprint A（已封存）邏輯
+	•	❌ 改變任何數值計算公式
+	•	❌ 改變報告區段順序
+	•	❌ 自行 refactor 未指定區域
+	•	❌ 新增外部依賴
+	•	❌ 在未經確認下 commit
+
+⸻
+
+✅ 必須遵守（Hard Yes）
+
+每一次 Claude 任務 必須：
+	1.	Before coding
+	•	列出會修改的檔案
+	•	列出大致行數範圍
+	2.	Minimal diff
+	•	只改 prompt 指定內容
+	3.	Append-only（若指定）
+	•	只能在結尾新增
+	4.	Tests first
+	•	新邏輯必須有測試
+	•	pytest -q 必須通過
+	5.	人工確認
+	•	使用者確認 git diff
+	•	才能 commit
+
+⸻
+
+標準 Prompt 模板（強烈建議）
+
+Task:
+Repo / Files:
+GUARDRAILS:
+- Sprint A frozen
+- Minimal diff only
+- Append-only
+Tests:
+Commit message:
+
+Before coding:
+- List files and line ranges you will touch.
+
+
+⸻
+
+Claude 允許做的事
+	•	新增 helper function（純函式）
+	•	新增 tests
+	•	補文件（RUNBOOK / prompts）
+	•	改 display / formatting（不影響邏輯）
+
+⸻
+
+Claude 不確定時的行為
+
+當 Claude 不確定時，必須：
+	•	停下來
+	•	明確詢問
+	•	不自行猜測或補齊
+
+⸻
+
+違規處理
+
+若 Claude：
+	•	違反 guardrails
+	•	或造成非預期修改
+
+→ 立即 rollback + 更新 prompt 規範
+
+⸻
+
+建議 Commit Message
+
+docs: add AI guardrails for Claude Code usage
+
+
+⸻
