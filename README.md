@@ -182,6 +182,4 @@ MVP 採用 VM 部署並支援 GitHub push 自動更新：
 - [TESTING.md](TESTING.md)：前後端測試策略與命令
 - [DEPLOYMENT.md](DEPLOYMENT.md)：VM 部署與自動更新
 - [CHANGELOG.md](CHANGELOG.md)：版本沿革與 MVP 里程碑
-
-
-test
+test111
