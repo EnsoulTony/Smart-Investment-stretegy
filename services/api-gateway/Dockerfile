@@ -2,7 +2,8 @@
 FROM python:3.12-slim
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
-    PYTHONUNBUFFERED=1
+    PYTHONUNBUFFERED=1 \
+    PYTHONPATH=/app
 
 WORKDIR /app
 
@@ -11,6 +12,7 @@ COPY services/api-gateway/requirements.txt /tmp/service-requirements.txt
 RUN pip install --no-cache-dir -r /tmp/base-requirements.txt -r /tmp/service-requirements.txt
 
 COPY services/api-gateway/app /app/app
+COPY services/api-gateway/tests /app/tests
 
 ENV PORT=8000
 ENV SERVICE_NAME=api-gateway

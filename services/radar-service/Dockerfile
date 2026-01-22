@@ -2,7 +2,8 @@
 FROM python:3.12-slim
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
-    PYTHONUNBUFFERED=1
+    PYTHONUNBUFFERED=1 \
+    PYTHONPATH=/app
 
 WORKDIR /app
 
@@ -11,6 +12,7 @@ COPY services/radar-service/requirements.txt /tmp/service-requirements.txt
 RUN pip install --no-cache-dir -r /tmp/base-requirements.txt -r /tmp/service-requirements.txt
 
 COPY services/radar-service/app /app/app
+COPY services/radar-service/tests /app/tests
 
 ENV PORT=8002
 ENV SERVICE_NAME=radar-service

@@ -2,7 +2,8 @@
 FROM python:3.12-slim
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
-    PYTHONUNBUFFERED=1
+    PYTHONUNBUFFERED=1 \
+    PYTHONPATH=/app
 
 WORKDIR /app
 
@@ -11,6 +12,7 @@ COPY services/research-service/requirements.txt /tmp/service-requirements.txt
 RUN pip install --no-cache-dir -r /tmp/base-requirements.txt -r /tmp/service-requirements.txt
 
 COPY services/research-service/app /app/app
+COPY services/research-service/tests /app/tests
 
 ENV PORT=8004
 ENV SERVICE_NAME=research-service
