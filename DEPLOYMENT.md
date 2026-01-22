@@ -33,16 +33,31 @@
       steps:
         - name: Checkout
           uses: actions/checkout@v4
-        - name: Deploy via SSH
-          uses: appleboy/ssh-action@v1
-          with:
-            host: ${{ secrets.VM_HOST }}
-            username: ${{ secrets.VM_USER }}
-            key: ${{ secrets.VM_SSH_KEY }}
-            script: |
-              /srv/smart-investment/infra/vm/deploy.sh
+        - name: Setup SSH key
+          run: |
+            mkdir -p ~/.ssh
+            printf '%s' "${{ secrets.VM_SSH_KEY }}" > ~/.ssh/id_rsa
+            chmod 600 ~/.ssh/id_rsa
+            ssh-keyscan -H "${{ secrets.VM_HOST }}" >> ~/.ssh/known_hosts
+        - name: Deploy
+          run: |
+            set -o pipefail
+            ssh -i ~/.ssh/id_rsa -p "${{ secrets.VM_SSH_PORT }}" "${{ secrets.VM_USER }}@${{ secrets.VM_HOST }}" "bash /opt/radar-warroom/infra/vm/deploy.sh" | tee deploy.log
+        - name: Deploy log summary (on failure)
+          if: failure()
+          run: |
+            echo "==== deploy log (last 200 lines) ===="
+            if [ -f deploy.log ]; then
+              tail -n 200 deploy.log
+            else
+              echo "No deploy log captured."
+            fi
   ```
-- 所有 Secrets（`VM_HOST`, `VM_USER`, `VM_SSH_KEY`, `ANTHROPIC_API_KEY`, `POSTGRES_PASSWORD` 等）須儲存在 GitHub Secrets。
+- 需要在 GitHub Secrets 設定：
+  - `VM_HOST`
+  - `VM_USER`
+  - `VM_SSH_KEY`
+  - `VM_SSH_PORT`
 
 ## 3. systemd timer 保底方案
 
