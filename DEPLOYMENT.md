@@ -5,30 +5,22 @@
 ## 1. 基礎設置（一次性）
 
 1. 建立 Ubuntu 22.04 VM（建議 4 vCPU / 8 GB RAM / 100 GB SSD）。
-2. 安裝必要套件：
-   ```bash
-   sudo apt update && sudo apt install -y docker.io docker-compose-plugin git
-   sudo usermod -aG docker $USER
-   ```
-3. 於 `/srv/smart-investment` clone 專案：
-   ```bash
-   sudo mkdir -p /srv/smart-investment
-   sudo chown $USER:$USER /srv/smart-investment
-   git clone git@github.com:horstcheng/Smart-Investment-stretegy.git /srv/smart-investment
-   ```
-4. 建立 `.env`（使用 `.env.example` 內容）。
+2. 以 root 執行 bootstrap（會安裝 Docker、Compose plugin、Git，並建立 `/opt/radar-warroom`）：
+  ```bash
+  sudo bash /opt/radar-warroom/infra/vm/bootstrap.sh
+  ```
+  如果是新機器，請先將 repo 放到 `/opt/radar-warroom` 或改用下列方式：
+  ```bash
+  sudo mkdir -p /opt/radar-warroom
+  sudo git clone https://github.com/EnsoulTony/Smart-Investment-stretegy.git /opt/radar-warroom
+  sudo bash /opt/radar-warroom/infra/vm/bootstrap.sh
+  ```
+3. 首次執行後請登出再登入（套用 docker 群組權限）。
+4. `.env` 會從 `.env.example` 建立，請填入必要機密資訊。
 
 ## 2. GitHub Actions → SSH 自動部署
 
-- 建立 `infra/vm/deploy.sh`（範例內容）：
-  ```bash
-  #!/usr/bin/env bash
-  set -euo pipefail
-  cd /srv/smart-investment
-  git fetch origin main
-  git reset --hard origin/main
-  make docker-up
-  ```
+- 部署腳本：`/opt/radar-warroom/infra/vm/deploy.sh`
 - GitHub Actions workflow（摘要）：
   ```yaml
   name: Deploy to VM
@@ -54,16 +46,17 @@
 
 ## 3. systemd timer 保底方案
 
-- 建立 service：`/etc/systemd/system/radar-auto-update.service`
+- 建立 service：`/etc/systemd/system/radar-deploy.service`
   ```ini
   [Unit]
-  Description=Radar auto update service
+  Description=Radar deploy service
 
   [Service]
   Type=oneshot
-  ExecStart=/srv/smart-investment/infra/vm/deploy.sh --auto
+  WorkingDirectory=/opt/radar-warroom
+  ExecStart=/opt/radar-warroom/infra/vm/deploy.sh --auto
   ```
-- 建立 timer：`/etc/systemd/system/radar-auto-update.timer`
+- 建立 timer：`/etc/systemd/system/radar-deploy.timer`
   ```ini
   [Unit]
   Description=Run radar deploy every 15 minutes
@@ -71,7 +64,7 @@
   [Timer]
   OnBootSec=5min
   OnUnitActiveSec=15min
-  Unit=radar-auto-update.service
+  Unit=radar-deploy.service
 
   [Install]
   WantedBy=timers.target
@@ -79,7 +72,7 @@
 - 啟用：
   ```bash
   sudo systemctl daemon-reload
-  sudo systemctl enable --now radar-auto-update.timer
+  sudo systemctl enable --now radar-deploy.timer
   ```
 - 功能：即使 GitHub Actions 失敗，timer 仍會定期拉取最新程式並執行 `deploy.sh`。
 
@@ -87,9 +80,7 @@
 
 ```bash
 ssh vm-user@vm-host
-cd /srv/smart-investment
-make docker-down
-make docker-up
+sudo /opt/radar-warroom/infra/vm/deploy.sh
 ```
 
 ## 5. 驗證步驟
@@ -97,7 +88,7 @@ make docker-up
 1. `docker ps`：確認所有服務運行。
 2. `curl http://localhost:8000/health`。
 3. `curl http://localhost:8080`：檢查前端頁面。
-4. `journalctl -u radar-auto-update.timer -n 20`：確認最近一次 timer 執行情況。
+4. `journalctl -u radar-deploy.timer -n 20`：確認最近一次 timer 執行情況。
 
 ## 6. 回滾
 

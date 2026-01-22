@@ -1,0 +1,10 @@
+[Unit]
+Description=Run radar deploy every 15 minutes
+
+[Timer]
+OnBootSec=5min
+OnUnitActiveSec=15min
+Unit=radar-deploy.service
+
+[Install]
+WantedBy=timers.target

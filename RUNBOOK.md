@@ -7,7 +7,7 @@
 1. `docker ps --format 'table {{.Names}}\t{{.Status}}'`（所有容器須為 healthy）
 2. `curl http://localhost:8000/health`（Gateway 探活）
 3. `curl http://localhost:8001/health` ~ `8004/health`（抽樣）
-4. `journalctl -u radar-auto-update.timer -n 30`
+4. `journalctl -u radar-deploy.timer -n 30`
 5. `docker exec postgres pg_isready`
 6. 檢查最新 `recommendations`、`news_signals` 是否更新（可透過 SQL 或 API）
 
@@ -42,12 +42,12 @@
 
 ## 5. systemd timer（保底部署）
 
-- Service：`/etc/systemd/system/radar-auto-update.service`
-- Timer：`/etc/systemd/system/radar-auto-update.timer`
-- 功能：每 15 分鐘執行 `infra/vm/deploy.sh --auto`，若 GitHub Actions 部署失敗仍可更新。
+- Service：`/etc/systemd/system/radar-deploy.service`
+- Timer：`/etc/systemd/system/radar-deploy.timer`
+- 功能：每 15 分鐘執行 `/opt/radar-warroom/infra/vm/deploy.sh --auto`，若 GitHub Actions 部署失敗仍可更新。
 - 常用指令：
-	- `systemctl status radar-auto-update.timer`
-	- `journalctl -u radar-auto-update.service -f`
+	- `systemctl status radar-deploy.timer`
+	- `journalctl -u radar-deploy.service -f`
 
 ## 6. AI 協作者（Claude / Aider）守則
 
@@ -72,8 +72,7 @@
 make docker-logs
 
 # 手動重新部署（VM 上）
-git pull origin main
-make docker-up
+sudo /opt/radar-warroom/infra/vm/deploy.sh
 
 # 匯出 Postgres 備份
 docker exec postgres pg_dump -U investment investment_db > backups/$(date +%F).sql

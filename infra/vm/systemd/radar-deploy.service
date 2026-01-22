@@ -1,0 +1,13 @@
+[Unit]
+Description=Radar deploy service
+Wants=network-online.target docker.service
+After=network-online.target docker.service
+
+[Service]
+Type=oneshot
+WorkingDirectory=/opt/radar-warroom
+ExecStart=/opt/radar-warroom/infra/vm/deploy.sh --auto
+TimeoutStartSec=900
+
+[Install]
+WantedBy=multi-user.target
