@@ -152,7 +152,10 @@ Before coding:
 - services/portfolio-service/app/sheets_client.py (Google Sheets API 客戶端，約 100 行)
 - services/portfolio-service/app/schemas.py (TradeRecord Pydantic 模型，約 120 行)
 - services/portfolio-service/app/trade_normalizer.py (資料標準化與 hash 計算，約 180 行)
+  - **Hash 版本控制**：CANONICAL_VERSION = "v1" 前綴避免未來規則變動造成衝突
+  - compute_source_hash() 包含版本：sha256(f"{version}|{canonical_string}")
 - services/portfolio-service/tests/test_trade_normalizer.py (單元測試，約 300 行)
+- services/portfolio-service/tests/test_hash_versioning.py (版本控制測試)
 - services/portfolio-service/requirements.txt (新增 gspread, google-auth, pydantic)
 - .env.example (新增 GOOGLE_SA_JSON, GOOGLE_SHEET_ID 等環境變數)
 - SECURITY.md (新增 Service Account 金鑰管理說明)
@@ -183,7 +186,13 @@ Repo / Files:
 3. API 層：
    - POST /portfolio/sync 不需 body（從環境變數讀取 Google Sheets 資訊）
    - 回傳 JSON: {run_id, inserted_count, skipped_count, errors_count, status, synced_at}
+   - **可觀測性欄位**（v0.2.3+）：
+     * sheet_rows_count: 從 Sheets 讀取的總列數
+     * normalized_valid_count: 成功轉換為 TradeRecord 的筆數
+     * normalized_invalid_count: 格式錯誤筆數（= errors_count）
+     * duplicates_count: DB 重複跳過筆數（source_hash 去重）
    - 整合錯誤處理：回傳 500 + 錯誤訊息
+   - 日誌輸出：使用 logger.info/warning/exception 記錄關鍵步驟，不記錄敏感資料
 
 4. 測試策略（monkeypatch SheetsClient）：
    - test_first_sync_inserts_all_records: 3 筆全插入

@@ -15,6 +15,11 @@ from pydantic import ValidationError
 from app.schemas import TradeRecord
 
 
+# Hash 版本控制：避免未來 canonical 規則變動造成 hash 衝突
+# v1: 初始版本（user_id|symbol|asset_ccy|side|quantity|price|fee|trade_date|broker）
+CANONICAL_VERSION = "v1"
+
+
 def safe_str(v) -> str:
     """安全地將任意值轉換為字串。
     
@@ -309,17 +314,20 @@ class TradeNormalizer:
         """計算交易記錄的 source_hash。
         
         使用固定的欄位順序與格式，確保相同的交易資料產生相同的 hash。
+        Hash 包含版本前綴，避免未來規則變動造成衝突。
         
         Hash 計算方式：
         1. 將所有欄位按固定順序串接成 canonical 字串
-        2. 使用 SHA-256 計算 hash
+        2. 前綴版本標識（CANONICAL_VERSION）
+        3. 使用 SHA-256 計算 hash
         
         Canonical 字串格式：
-        user_id|symbol|asset_ccy|side|quantity|price|fee|trade_date|broker
+        {version}|user_id|symbol|asset_ccy|side|quantity|price|fee|trade_date|broker
         
         注意事項：
         - Decimal 欄位統一格式化為字串（避免 1.0 vs 1.00 的差異）
         - 日期統一格式化為 ISO 8601（YYYY-MM-DD HH:MM:SS）
+        - 版本前綴確保未來 canonical 規則變更時不會產生相同 hash
         
         Args:
             trade: TradeRecord 物件
@@ -342,8 +350,8 @@ class TradeNormalizer:
             trade_date_naive = trade.trade_date
         trade_date_str = trade_date_naive.strftime("%Y-%m-%d %H:%M:%S")
         
-        # 按固定順序串接（使用 | 分隔）
-        canonical = "|".join([
+        # 按固定順序串接（使用 | 分隔），包含版本前綴
+        canonical = f"{CANONICAL_VERSION}|" + "|".join([
             trade.user_id,
             trade.symbol,
             trade.asset_ccy,

@@ -9,6 +9,7 @@
 """
 
 import json
+import logging
 import uuid
 from typing import Dict, List, Any
 from sqlalchemy.orm import Session
@@ -17,6 +18,9 @@ from app.sheets_client import SheetsClient
 from app.trade_normalizer import TradeNormalizer
 from app.repositories.trades_repo import TradesRepository
 from app.repositories.sync_runs_repo import SyncRunsRepository
+
+# 設定 logger
+logger = logging.getLogger(__name__)
 
 
 class SyncResult:
@@ -29,7 +33,11 @@ class SyncResult:
         updated_count: int,
         skipped_count: int,
         errors_count: int,
-        status: str = "succeeded"
+        status: str = "succeeded",
+        sheet_rows_count: int = 0,
+        normalized_valid_count: int = 0,
+        normalized_invalid_count: int = 0,
+        duplicates_count: int = 0
     ):
         self.run_id = run_id
         self.inserted_count = inserted_count
@@ -37,6 +45,11 @@ class SyncResult:
         self.skipped_count = skipped_count
         self.errors_count = errors_count
         self.status = status
+        # 可觀測性欄位
+        self.sheet_rows_count = sheet_rows_count
+        self.normalized_valid_count = normalized_valid_count
+        self.normalized_invalid_count = normalized_invalid_count
+        self.duplicates_count = duplicates_count
     
     def to_dict(self) -> Dict[str, Any]:
         """轉換為字典（用於 API 回應）。"""
@@ -46,7 +59,12 @@ class SyncResult:
             "updated_count": self.updated_count,
             "skipped_count": self.skipped_count,
             "errors_count": self.errors_count,
-            "status": self.status
+            "status": self.status,
+            # 可觀測性欄位
+            "sheet_rows_count": self.sheet_rows_count,
+            "normalized_valid_count": self.normalized_valid_count,
+            "normalized_invalid_count": self.normalized_invalid_count,
+            "duplicates_count": self.duplicates_count
         }
 
 
@@ -84,7 +102,7 @@ class SyncService:
         5. 更新 sync_run 狀態與統計
         
         Returns:
-            SyncResult: 同步結果（含 run_id, inserted/skipped/errors 統計）
+            SyncResult: 同步結果（含 run_id, inserted/skipped/errors 統計與可觀測性欄位）
         
         Raises:
             Exception: 當同步過程發生嚴重錯誤時
@@ -92,25 +110,34 @@ class SyncService:
         # Step 1: 建立 sync_run 記錄
         sync_run = self.sync_runs_repo.create_run()
         run_id = sync_run.run_id
+        logger.info(f"同步開始 run_id={run_id}")
         
         try:
             # Step 2: 從 Google Sheets 讀取資料
             rows_dicts = self.sheets_client.fetch_trades_dicts()
+            sheet_rows_count = len(rows_dicts)
+            logger.info(f"從 Google Sheets 讀取 {sheet_rows_count} 列資料")
             
             # Step 3: 標準化與驗證
             valid_trades, failed_rows = self.normalizer.normalize_rows(rows_dicts)
+            normalized_valid_count = len(valid_trades)
+            normalized_invalid_count = len(failed_rows)
+            logger.info(f"標準化結果：成功 {normalized_valid_count} 筆，失敗 {normalized_invalid_count} 筆")
             
-            errors_count = len(failed_rows)
+            errors_count = normalized_invalid_count
             
             # Step 4: 批次寫入 trades 表（使用 ON CONFLICT DO NOTHING 去重）
-            inserted_count, skipped_count = 0, 0
+            inserted_count, duplicates_count = 0, 0
             
             if valid_trades:
-                inserted_count, skipped_by_hash = self.trades_repo.bulk_insert_trades(valid_trades)
-                # skipped_count 包含：source_hash 重複的筆數 + 驗證失敗的筆數
-                skipped_count = skipped_by_hash + errors_count
+                logger.info(f"準備寫入 {len(valid_trades)} 筆交易記錄到資料庫")
+                inserted_count, duplicates_count = self.trades_repo.bulk_insert_trades(valid_trades)
+                logger.info(f"寫入完成：插入 {inserted_count} 筆，重複跳過 {duplicates_count} 筆")
             else:
-                skipped_count = errors_count
+                logger.warning("無有效交易記錄可寫入")
+            
+            # skipped_count = 重複筆數 + 驗證失敗筆數
+            skipped_count = duplicates_count + errors_count
             
             # Step 5: 建立錯誤摘要（最多保留前 20 筆，包含原始資料）
             error_message = None
@@ -136,6 +163,8 @@ class SyncService:
             else:
                 status = "failed"
             
+            logger.info(f"同步狀態：{status}")
+            
             # Step 7: 更新 sync_run 狀態
             self.sync_runs_repo.finish_run(
                 run_id=run_id,
@@ -152,11 +181,17 @@ class SyncService:
                 updated_count=0,
                 skipped_count=skipped_count,
                 errors_count=errors_count,
-                status=status
+                status=status,
+                # 可觀測性欄位
+                sheet_rows_count=sheet_rows_count,
+                normalized_valid_count=normalized_valid_count,
+                normalized_invalid_count=normalized_invalid_count,
+                duplicates_count=duplicates_count
             )
             
         except Exception as e:
             # 發生錯誤：更新 sync_run 狀態（failed）
+            logger.exception(f"同步過程發生錯誤 run_id={run_id}: {e}")
             error_message = f"{type(e).__name__}: {str(e)}"
             
             try:

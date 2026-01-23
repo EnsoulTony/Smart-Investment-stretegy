@@ -71,18 +71,27 @@ POST /portfolio/sync
   "status": "succeeded",
   "run_id": "sync-run-uuid",
   "inserted_count": 15,
+  "updated_count": 0,
   "skipped_count": 3,
   "errors_count": 0,
-  "synced_at": "2026-01-23T10:30:00Z"
+  "sheet_rows_count": 20,
+  "normalized_valid_count": 18,
+  "normalized_invalid_count": 0,
+  "duplicates_count": 3
 }
 ```
 
 **說明：**
 - `status`: "succeeded" | "failed" | "partial_succeeded"
 - `inserted_count`: 成功插入的交易記錄數量
-- `skipped_count`: 因 source_hash 重複跳過的記錄（去重）
-- `errors_count`: 驗證失敗的記錄數量（例如：quantity=0、缺少欄位）
-- `synced_at`: 同步完成時間（ISO 8601 格式）
+- `updated_count`: 更新的交易記錄數量（目前固定為 0）
+- `skipped_count`: 總跳過筆數（= duplicates_count + errors_count）
+- `errors_count`: 驗證失敗的記錄數量（格式錯誤、缺少欄位等）
+- **可觀測性欄位**（v0.2.3+）：
+  - `sheet_rows_count`: 從 Google Sheets 讀取的總列數
+  - `normalized_valid_count`: 成功轉換為 TradeRecord 的筆數
+  - `normalized_invalid_count`: 格式錯誤無法轉換的筆數（= errors_count）
+  - `duplicates_count`: 因 source_hash 重複被資料庫去重的筆數
 
 **Error 400 Bad Request**
 ```json

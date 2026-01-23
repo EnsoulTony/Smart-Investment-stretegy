@@ -1,5 +1,25 @@
 # CHANGELOG.md｜版本沿革
 
+## [0.2.3] - 2026-01-23（Portfolio Service 可觀測性與 Hash 版本控制加固）
+- **source_hash 版本控制**：避免未來 canonical 規則變動造成 hash 衝突
+  - 在 trade_normalizer.py 加入 `CANONICAL_VERSION = "v1"` 常數
+  - compute_source_hash() 改為包含版本前綴：`sha256(f"{version}|{canonical_string}")`
+  - 確保未來規則變更時不會與舊資料產生相同 hash
+- **/portfolio/sync 可觀測性增強**：新增以下回應欄位（不改 DB schema）
+  - `sheet_rows_count`：從 Google Sheets 讀取的總列數
+  - `normalized_valid_count`：成功轉換為 TradeRecord 的筆數
+  - `normalized_invalid_count`：格式錯誤無法轉換的筆數（= errors_count）
+  - `duplicates_count`：因 source_hash 重複跳過的筆數（DB 去重）
+  - 新欄位讓開發者清楚區分「格式錯誤」與「DB 重複」
+- **日誌增強**：在 sync_service.py 加入結構化 log
+  - 記錄同步開始、讀取列數、標準化結果、寫入結果、同步狀態
+  - 使用 logger.info/warning/exception，不記錄敏感資料
+- **測試覆蓋**：新增測試確保加固有效
+  - test_hash_versioning.py：驗證版本前綴、hash 一致性、版本變更時 hash 不同
+  - test_sync_observability.py：驗證可觀測性欄位正確性、數學關係（skipped = duplicates + errors）
+- 更新 Development.md：說明 hash 版本控制目的與可觀測性欄位用途
+- 更新 API_CONTRACTS.md：補充 /portfolio/sync 回應的新欄位說明
+
 ## [0.2.2] - 2026-01-23（Sprint 1-2：Google Sheets Client 與交易標準化）
 - 建立 Google Sheets 整合與交易資料標準化模組
   - 使用 Service Account 認證存取 Google Sheets
