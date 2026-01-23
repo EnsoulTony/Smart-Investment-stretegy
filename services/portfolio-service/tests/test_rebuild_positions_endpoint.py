@@ -112,24 +112,48 @@ def test_rebuild_positions_missing_user_id(client):
 
 
 def test_rebuild_positions_empty_user_id(client):
-    """測試：user_id 為空字串時回傳 422。
+    """測試：user_id 為空字串時回傳 422（Pydantic Validation Contract）。
     
-    驗證：
-    - HTTP status code = 422（Pydantic min_length=1 驗證失敗）
-    - 錯誤訊息包含驗證錯誤資訊
+    驗證 Pydantic validation contract：
+    - HTTP status code = 422（min_length=1 驗證失敗）
+    - response.detail 包含 validation error
+    - error 指向 "user_id" 欄位
+    - error type 為 "string_too_short" 或類似的長度驗證錯誤
     
-    Notes:
-        - Pydantic 會在 request validation 階段就擋住空字串
-        - 這是正確的防禦性設計（在最外層驗證輸入）
+    Contract 保證：
+        - 空字串在進入業務邏輯前就被 Pydantic 攔截（防禦性設計）
+        - 回應格式符合 FastAPI 標準 validation error 結構
+        - 錯誤訊息足夠明確，可追蹤到具體欄位
     """
     response = client.post(
         "/portfolio/rebuild_positions",
         json={"user_id": ""}
     )
     
+    # Contract 1: 驗證層攔截，回傳 422
     assert response.status_code == 422, f"預期 422，實際：{response.status_code}"
+    
+    # Contract 2: 回應格式符合 FastAPI validation error 結構
     error_detail = response.json()
-    assert "detail" in error_detail
+    assert "detail" in error_detail, "回應缺少 detail 欄位"
+    
+    # Contract 3: detail 是錯誤列表，至少有一筆錯誤
+    assert isinstance(error_detail["detail"], list), "detail 應為 list"
+    assert len(error_detail["detail"]) > 0, "至少要有一筆驗證錯誤"
+    
+    # Contract 4: 錯誤指向 "user_id" 欄位（確保是該欄位的問題）
+    errors = error_detail["detail"]
+    user_id_error = None
+    for error in errors:
+        # Pydantic V2 格式：{"type": "string_too_short", "loc": ["body", "user_id"], ...}
+        if "loc" in error and "user_id" in error["loc"]:
+            user_id_error = error
+            break
+    
+    assert user_id_error is not None, "應有指向 user_id 的驗證錯誤"
+    assert "type" in user_id_error, "錯誤應包含 type 欄位"
+    # Pydantic V2 的 min_length 錯誤類型為 "string_too_short"
+    assert "string_too_short" in user_id_error["type"], f"預期 string_too_short 錯誤，實際：{user_id_error['type']}"
 
 
 def test_rebuild_positions_with_different_user_ids(client):

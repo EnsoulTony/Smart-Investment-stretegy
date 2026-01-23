@@ -212,7 +212,25 @@ class TestSyncEndpoint:
         monkeypatch,
         db_session
     ):
-        """測試混入無效資料：errors_count > 0 但整體仍 succeeded。"""
+        """測試混入無效資料：驗證可觀測性欄位的語意正確性（Contract Test）。
+        
+        測試場景：
+        - fixture 包含 3 筆資料：2 筆有效 + 1 筆無效（quantity=0）
+        
+        Contract 驗證：
+        1. status = "partial_succeeded"（有資料被拒絕，但有部分成功）
+        2. inserted_count = 2（有效資料成功插入）
+        3. errors_count = 1（無效資料算在 errors，不是 skipped）
+        4. skipped_count = errors_count（當前實作：無效資料也算在 skipped）
+        5. normalized_invalid_count = 1（可觀測性：格式錯誤筆數）
+        
+        關鍵語意：
+        - errors_count：驗證失敗的筆數（格式錯誤、欄位不合法等）
+        - skipped_count：未寫入 DB 的總筆數（= errors + duplicates）
+        - duplicates_count：重複資料（source_hash 衝突）
+        
+        確保 invalid 資料不會被誤判為 duplicate。
+        """
         # 創建 Mock 類別（替代 SheetsClient）
         captured_data = mock_sheets_data_with_invalid
         
@@ -229,14 +247,42 @@ class TestSyncEndpoint:
         # 呼叫 API
         response = client.post("/portfolio/sync")
         
-        # 驗證回應
-        assert response.status_code == 200
+        # Contract 1: HTTP 層成功，但業務層部分失敗
+        assert response.status_code == 200, "API 呼叫應成功"
         data = response.json()
         
-        assert data["status"] == "partial_succeeded"  # 部分成功（有資料被跳過）
-        assert data["inserted_count"] == 2   # 2 筆有效資料插入
-        assert data["errors_count"] == 1      # 1 筆驗證失敗
-        assert data["skipped_count"] == 1     # 1 筆被跳過（errors_count）
+        # Contract 2: status 明確表示部分成功（不是 succeeded，也不是 failed）
+        assert data["status"] == "partial_succeeded", \
+            f"有 errors 時應回傳 partial_succeeded，實際：{data['status']}"
+        
+        # Contract 3: 有效資料成功插入（符合 fixture 的 2 筆有效資料）
+        assert data["inserted_count"] == 2, \
+            f"fixture 有 2 筆有效資料，應全部插入，實際：{data['inserted_count']}"
+        
+        # Contract 4: 無效資料被正確識別（errors_count > 0）
+        assert data["errors_count"] == 1, \
+            f"fixture 有 1 筆無效資料（quantity=0），實際：{data['errors_count']}"
+        assert data["errors_count"] > 0, "應有驗證錯誤"
+        
+        # Contract 5: skipped_count 語意正確（= errors + duplicates）
+        # 當前場景：1 筆 error，0 筆 duplicate
+        assert data["skipped_count"] == data["errors_count"], \
+            "skipped_count 應等於 errors_count（無 duplicate 情境）"
+        
+        # Contract 6: 可觀測性欄位提供除錯資訊
+        # normalized_invalid_count 應與 errors_count 一致（格式錯誤筆數）
+        if "normalized_invalid_count" in data:
+            assert data["normalized_invalid_count"] == 1, \
+                f"應有 1 筆格式錯誤，實際：{data['normalized_invalid_count']}"
+        
+        # Contract 7: 總量平衡（sheet_rows = valid + invalid）
+        if "sheet_rows_count" in data and "normalized_valid_count" in data:
+            assert data["sheet_rows_count"] == 3, "fixture 總共 3 筆資料"
+            assert data["normalized_valid_count"] == 2, "2 筆有效"
+            assert data["normalized_invalid_count"] == 1, "1 筆無效"
+            assert data["sheet_rows_count"] == \
+                   data["normalized_valid_count"] + data["normalized_invalid_count"], \
+                   "總量應平衡：sheet_rows = valid + invalid"
     
     def test_sync_google_sheets_connection_failure(
         self, 
