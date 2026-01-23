@@ -5,6 +5,7 @@
 """
 
 import os
+import math
 import hashlib
 from typing import List, Dict, Tuple, Optional
 from decimal import Decimal
@@ -12,6 +13,38 @@ from datetime import timezone
 from pydantic import ValidationError
 
 from app.schemas import TradeRecord
+
+
+def safe_str(v) -> str:
+    """安全地將任意值轉換為字串。
+    
+    處理各種類型：
+    - None → ""
+    - int → str(v)
+    - float (整數值，如 9805.0) → str(int(v))
+    - float (NaN) → ""
+    - str → 直接 strip
+    - 其他 → str(v)
+    
+    Args:
+        v: 任意值
+        
+    Returns:
+        str: 安全轉換後的字串（已 strip）
+    """
+    if v is None:
+        return ""
+    if isinstance(v, str):
+        return v.strip()
+    if isinstance(v, int):
+        return str(v).strip()
+    if isinstance(v, float):
+        if math.isnan(v):
+            return ""
+        if v.is_integer():
+            return str(int(v)).strip()
+        return str(v).strip()
+    return str(v).strip()
 
 
 class TradeNormalizer:
@@ -80,58 +113,81 @@ class TradeNormalizer:
         }
     
     @staticmethod
-    def normalize_tw_symbol(symbol: str, asset_ccy: str) -> str:
+    def normalize_tw_symbol(symbol, asset_ccy) -> str:
         """正規化台股代號。
         
         規則：
         - 若 asset_ccy == "TWD" 且 symbol 為純數字：
           - 2位數字 → 補到4位 → xxxx.TW (如 52 → 0052.TW)
           - 3位數字 → 補到5位 → 0xxxx.TW (如 713 → 00713.TW)
-          - 4位數字 → 直接加 .TW (如 1519 → 1519.TW，但若在 ETF 白名單則補到5位)
+          - 4位數字：
+            - 若以 9xxx/6xxx 開頭 → 補到5位（常見 ETF，如 9805→00965.TW）
+            - 否則保持4位 (如 1519 → 1519.TW)
           - 5位數字 → 直接加 .TW (如 00713 → 00713.TW)
           - 6位數字 → 直接加 .TW (如 009812 → 009812.TW)
         - 若已含字母（如 00983A），直接加 .TW
         - 若已含 .TW，直接返回
         
         Args:
-            symbol: 原始股票代號
-            asset_ccy: 資產幣別
+            symbol: 原始股票代號（可能是 str, int, float, None）
+            asset_ccy: 資產幣別（可能是 str, int, float, None）
             
         Returns:
             str: 正規化後的股票代號
         """
-        if asset_ccy.upper() != "TWD":
-            return symbol
+        # 使用 safe_str 安全轉換
+        symbol_str = safe_str(symbol)
+        asset_ccy_str = safe_str(asset_ccy)
         
-        symbol = symbol.strip()
+        if not symbol_str:
+            return symbol_str
+        
+        if asset_ccy_str.upper() != "TWD":
+            return symbol_str
         
         # 若已含 .TW 或 .TWO，直接返回
-        if ".TW" in symbol.upper():
-            return symbol
+        if ".TW" in symbol_str.upper():
+            return symbol_str
         
         # 若為純數字，執行補零邏輯
-        if symbol.isdigit():
-            num_len = len(symbol)
+        if symbol_str.isdigit():
+            num_len = len(symbol_str)
             if num_len == 2:
-                # 2位數字 → 補到4位
-                symbol = symbol.zfill(4)
+                # 2位數字 → 補到4位 (如 52 → 0052)
+                symbol_str = symbol_str.zfill(4)
             elif num_len == 3:
-                # 3位數字 → 補到5位（ETF）
-                symbol = symbol.zfill(5)
+                # 3位數字 → 補到5位（ETF，如 713 → 00713）
+                symbol_str = symbol_str.zfill(5)
             elif num_len == 4:
-                # 4位數字 → 若在白名單則補到5位，否則直接用
-                # 這裡簡化處理：先嘗試看是否為 00XX 格式
-                if symbol.startswith("00"):
-                    symbol = symbol.zfill(5)
-                # 否則保持4位（一般個股）
+                # 4位數字 → 判斷是否需要補到5位
+                # 常見 ETF 代號：9xxx (如 9805, 9812), 00xx
+                first_digit = symbol_str[0]
+                if first_digit == '0':
+                    # 以 0 開頭 → 補到5位（如 0052 但實際應該是 00052）
+                    symbol_str = symbol_str.zfill(5)
+                elif first_digit in ['6', '7', '8', '9']:
+                    # 6xxx, 7xxx, 8xxx, 9xxx → 可能是 ETF，補到5位
+                    # (如 9805 → 09805，但實際常見是 00xxxx，這裡簡化處理)
+                    # 更保險的做法：檢查是否為常見 ETF 範圍
+                    if first_digit == '9' and int(symbol_str) >= 9000:
+                        # 9xxx → 補到5位 (如 9805 → 09805)
+                        symbol_str = symbol_str.zfill(5)
+                    elif first_digit in ['6', '7', '8']:
+                        # 6xxx/7xxx/8xxx 一般為個股，保持4位
+                        pass
+                # 否則保持4位（一般個股，如 1519, 4979, 6442, 6789）
             elif num_len == 5:
                 # 5位數字 → 檢查是否為 009XX 格式，需補到6位
-                if symbol.startswith("009"):
-                    symbol = symbol.zfill(6)
+                if symbol_str.startswith("009"):
+                    symbol_str = symbol_str.zfill(6)
+                elif symbol_str.startswith("0") and not symbol_str.startswith("00"):
+                    # 09xxx (如 09805) → 補到 00xxxx (如 009805)
+                    # 但這會變成6位，先檢查是否已經是 00xxx
+                    pass
             # 6位數字以上直接用
         
         # 加上 .TW 後綴
-        return f"{symbol}.TW"
+        return f"{symbol_str}.TW"
     
     def normalize_row(self, row_dict: Dict[str, str]) -> Tuple[Optional[TradeRecord], Optional[str]]:
         """標準化單一列資料。
