@@ -34,7 +34,6 @@ jobs:
       matrix:
         service:
           - api-gateway
-          - portfolio-service
           - radar-service
           - news-service
           - research-service
@@ -56,3 +55,28 @@ jobs:
       - name: Run pytest
         working-directory: services/${{ matrix.service }}
         run: pytest
+
+  portfolio-service-tests:
+    name: Backend - Portfolio Service (Docker)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Create .env file
+        run: |
+          cat > .env << EOF
+          DATABASE_URL=postgresql://investment:investment@postgres:5432/investment_db
+          GOOGLE_SA_JSON={"type":"service_account","project_id":"test"}
+          GOOGLE_SHEET_ID=test-sheet-id
+          GOOGLE_SHEET_NAME=test-sheet
+          EOF
+
+      - name: Build and run tests in Docker
+        run: |
+          docker compose up -d --build postgres portfolio-service
+          docker compose exec -T portfolio-service pytest -q
+        
+      - name: Cleanup
+        if: always()
+        run: docker compose down -v
