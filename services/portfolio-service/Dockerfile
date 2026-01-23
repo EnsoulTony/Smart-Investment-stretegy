@@ -13,6 +13,8 @@ RUN pip install --no-cache-dir -r /tmp/base-requirements.txt -r /tmp/service-req
 
 COPY services/portfolio-service/app /app/app
 COPY services/portfolio-service/tests /app/tests
+COPY services/portfolio-service/alembic.ini /app/alembic.ini
+COPY services/portfolio-service/alembic /app/alembic
 
 ENV PORT=8001
 ENV SERVICE_NAME=portfolio-service

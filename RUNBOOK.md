@@ -8,7 +8,7 @@
 2. `curl http://localhost:8000/health`（Gateway 探活）
 3. `curl http://localhost:8001/health` ~ `8004/health`（抽樣）
 4. `journalctl -u radar-deploy.timer -n 30`
-5. `docker exec postgres pg_isready`
+5. `docker compose exec postgres pg_isready`
 6. 檢查最新 `recommendations`、`news_signals` 是否更新（可透過 SQL 或 API）
 
 ## 2. 異常排查對照表
@@ -18,7 +18,7 @@
 | 前端空白或 5xx | Gateway 掛掉 / JWT 失效 | `docker logs api-gateway` → `docker restart api-gateway` |
 | Radar 無建議輸出 | 指標未更新 / 策略崩潰 | 1. `docker logs radar-service` 2. 確認 `indicator_values` 是否含最新 `RS_XLU_XLK` |
 | 新聞/研究訊號缺漏 | GDELT/RSS 限制 | 重啟對應服務並檢查 API 金鑰 |
-| Postgres 空間不足 | 快照過多 | `docker exec postgres du -sh /var/lib/postgresql/data` → 清理舊備份或擴容 |
+| Postgres 空間不足 | 快照過多 | `docker compose exec postgres du -sh /var/lib/postgresql/data` → 清理舊備份或擴容 |
 | docker compose up 失敗 | `.env` 缺值或埠被占用 | 1. 驗證 `.env` 2. `docker compose config` 3. 釋放埠號 |
 
 ## 3. 重啟與回滾
@@ -75,7 +75,7 @@ make docker-logs
 sudo /opt/radar-warroom/infra/vm/deploy.sh
 
 # 匯出 Postgres 備份
-docker exec postgres pg_dump -U investment investment_db > backups/$(date +%F).sql
+docker compose exec -T postgres pg_dump -U investment investment_db > backups/$(date +%F).sql
 ```
 好，下面這一份是可直接放進 repo、可直接 commit 的正式版 RUNBOOK.md（安裝與驗證篇）。
 我用的是「工程交接等級」的寫法，不是教學文，重點是 可重現、可驗證、可排錯。

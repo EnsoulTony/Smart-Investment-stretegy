@@ -119,6 +119,45 @@ Before coding:
 - services/portfolio-service/tests/test_positions.py (測試均價法計算)
 ```
 
+### Sprint 1-2: Google Sheets Client 與交易標準化
+```markdown
+Task: 建立 Google Sheets 客戶端與交易資料標準化模組
+Repo / Files:
+- services/portfolio-service/app/sheets_client.py
+- services/portfolio-service/app/schemas.py
+- services/portfolio-service/app/trade_normalizer.py
+- services/portfolio-service/tests/test_trade_normalizer.py
+- services/portfolio-service/requirements.txt
+- .env.example
+- SECURITY.md
+Constraints:
+- 使用 Service Account 認證（從 env 讀取 GOOGLE_SA_JSON）
+- 支援欄位 mapping（透過環境變數自訂欄位名稱）
+- 交易方向支援中文（買/賣）並轉換為 BUY/SELL
+- 計算 source_hash（SHA-256）用於去重
+- 所有金鑰不得寫入 repo
+Tests:
+- pytest services/portfolio-service/tests/test_trade_normalizer.py -v
+- 驗證方式：
+  1. 重建映像（包含新依賴）:
+     docker compose build portfolio-service
+  2. 啟動服務:
+     docker compose up -d portfolio-service
+  3. 執行測試（不需連 Google，使用 fixture 假資料）:
+     docker compose exec portfolio-service pytest tests/test_trade_normalizer.py -v
+  4. 驗證測試結果：
+     - 所有測試通過（約 10 個測試）
+     - 測試包含：欄位 mapping、side 轉換、日期解析、hash 穩定性
+Before coding:
+- services/portfolio-service/app/sheets_client.py (Google Sheets API 客戶端，約 100 行)
+- services/portfolio-service/app/schemas.py (TradeRecord Pydantic 模型，約 120 行)
+- services/portfolio-service/app/trade_normalizer.py (資料標準化與 hash 計算，約 180 行)
+- services/portfolio-service/tests/test_trade_normalizer.py (單元測試，約 300 行)
+- services/portfolio-service/requirements.txt (新增 gspread, google-auth, pydantic)
+- .env.example (新增 GOOGLE_SA_JSON, GOOGLE_SHEET_ID 等環境變數)
+- SECURITY.md (新增 Service Account 金鑰管理說明)
+```
+
 ### Sprint 1-3: 實作 GET /portfolio/trades
 ```markdown
 Task: 實作 portfolio-service 的 GET /portfolio/trades 端點
@@ -163,16 +202,18 @@ Constraints:
 Tests:
 - pytest services/portfolio-service/tests/test_db_schema.py
 - 驗證方式：
-  1. 啟動 docker compose: make docker-up
-  2. 進入 portfolio-service 容器執行 migration:
-     docker exec -it smart-investment-strategy-portfolio-service-1 alembic upgrade head
-  3. 執行測試: 
-     docker exec -it smart-investment-strategy-portfolio-service-1 pytest tests/test_db_schema.py -v
-  4. 或在本機執行（需設定 DATABASE_URL）:
-     cd services/portfolio-service
-     export DATABASE_URL=postgresql://investment:investment@localhost:5432/investment_db
-     alembic upgrade head
-     pytest tests/test_db_schema.py -v
+  1. 啟動 postgres 與 portfolio-service:
+     docker compose up -d --build postgres portfolio-service
+  2. 執行 migration（必須先執行！）:
+     docker compose exec portfolio-service alembic upgrade head
+  3. 若遇到 "relation already exists" 錯誤，執行:
+     docker compose exec portfolio-service alembic stamp head
+  4. 執行測試:
+     docker compose exec portfolio-service pytest tests/test_db_schema.py -v
+  5. 檢查資料表是否建立:
+     docker compose exec postgres psql -U investment -d investment_db -c "\dt"
+  6. 或使用一鍵驗證腳本:
+     bash services/portfolio-service/verify_setup.sh
 Before coding:
 - services/portfolio-service/alembic.ini (Alembic 設定)
 - services/portfolio-service/alembic/env.py (環境設定)

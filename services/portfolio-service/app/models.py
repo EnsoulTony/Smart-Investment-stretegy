@@ -6,7 +6,7 @@
 3. sync_runs - 同步紀錄
 """
 
-from datetime import datetime
+from datetime import datetime, timezone
 from sqlalchemy import Column, Integer, String, Numeric, DateTime, Text, UniqueConstraint, Index
 from sqlalchemy.dialects.postgresql import UUID
 import uuid
@@ -33,7 +33,7 @@ class Trade(Base):
     broker = Column(Text, nullable=False)
     source_row_id = Column(Text, nullable=True)
     source_hash = Column(Text, nullable=False, unique=True)
-    created_at = Column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)
+    created_at = Column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc))
     
     __table_args__ = (
         Index('ix_trades_user_symbol_date', 'user_id', 'symbol', 'trade_date'),
@@ -56,7 +56,7 @@ class Position(Base):
     avg_cost = Column(Numeric, nullable=False)
     realized_pnl = Column(Numeric, nullable=False, default=0)
     unrealized_pnl = Column(Numeric, nullable=False, default=0)
-    last_updated_at = Column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)
+    last_updated_at = Column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc))
     
     __table_args__ = (
         UniqueConstraint('user_id', 'symbol', name='uq_positions_user_symbol'),
@@ -71,7 +71,7 @@ class SyncRun(Base):
     __tablename__ = "sync_runs"
     
     run_id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    started_at = Column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)
+    started_at = Column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc))
     finished_at = Column(DateTime(timezone=True), nullable=True)
     status = Column(Text, nullable=False)  # started/succeeded/failed
     inserted_count = Column(Integer, nullable=False, default=0)

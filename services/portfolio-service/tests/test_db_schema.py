@@ -4,49 +4,17 @@
 1. migration 能成功執行
 2. 插入 trade 成功
 3. source_hash 唯一性約束正常運作
+
+雷 B 已修復：使用 conftest.py 的 transaction-based fixtures，每個測試自動 rollback。
 """
 
 import pytest
-import os
-from sqlalchemy import create_engine, text
-from sqlalchemy.orm import sessionmaker
+from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError
 from datetime import datetime
 import hashlib
 
-from app.db import Base
 from app.models import Trade, Position, SyncRun
-
-
-# 測試用資料庫 URL（使用 docker-compose 的 postgres）
-TEST_DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://investment:investment@postgres:5432/investment_db")
-
-
-@pytest.fixture(scope="module")
-def db_engine():
-    """建立測試用資料庫 engine。"""
-    engine = create_engine(TEST_DATABASE_URL)
-    yield engine
-    engine.dispose()
-
-
-@pytest.fixture(scope="module")
-def db_session(db_engine):
-    """建立測試用 session。"""
-    # 執行 migration（確保 schema 已建立）
-    Base.metadata.create_all(bind=db_engine)
-    
-    Session = sessionmaker(bind=db_engine)
-    session = Session()
-    
-    yield session
-    
-    # 清理測試資料
-    session.query(Trade).delete()
-    session.query(Position).delete()
-    session.query(SyncRun).delete()
-    session.commit()
-    session.close()
 
 
 def test_migration_success(db_engine):

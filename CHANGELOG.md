@@ -1,5 +1,22 @@
 # CHANGELOG.md｜版本沿革
 
+## [0.2.2] - 2026-01-23（Sprint 1-2：Google Sheets Client 與交易標準化）
+- 建立 Google Sheets 整合與交易資料標準化模組
+  - 使用 Service Account 認證存取 Google Sheets
+  - 支援欄位 mapping（透過環境變數自訂）
+  - 交易方向支援中文（買/賣）自動轉換為 BUY/SELL
+  - 計算 source_hash（SHA-256）用於去重
+- 新增 portfolio-service/app/sheets_client.py（Google Sheets API 客戶端）
+- 新增 portfolio-service/app/schemas.py（TradeRecord Pydantic 模型）
+- 新增 portfolio-service/app/trade_normalizer.py（資料標準化與 hash 計算）
+- 新增 portfolio-service/tests/test_trade_normalizer.py（單元測試，10 個測試案例）
+- 更新 portfolio-service/requirements.txt（加入 gspread、google-auth、pydantic）
+- 更新 .env.example（加入 GOOGLE_SA_JSON、GOOGLE_SHEET_ID 等環境變數）
+- 更新 SECURITY.md（新增 Service Account 金鑰管理說明，含本機/VM/CI 配置方式）
+- 更新 Development.md（新增 Sprint 1-2 驗收指令與檔案清單）
+- 新增 portfolio-service/verify_sprint_1-2.sh（Sprint 1-2 驗證腳本）
+- 修正 conftest.py 使用 SAVEPOINT 模式（消除 SAWarning: transaction already deassociated）
+
 ## [0.2.1] - 2026-01-23（Sprint 1-1：Portfolio Service DB Schema）
 - 建立 portfolio-service 資料庫 schema 與 migration
   - 使用 SQLAlchemy 2.x + Alembic 管理資料庫
@@ -11,8 +28,19 @@
 - 新增 portfolio-service/alembic（migration 管理）
 - 新增 portfolio-service/tests/test_db_schema.py（schema 測試）
 - 更新 portfolio-service/requirements.txt（加入 SQLAlchemy、Alembic、asyncpg、psycopg2-binary）
-- 新增 portfolio-service/README.md（migration 與測試指令說明）
-- 更新 Development.md 的 Sprint 1-4 說明（migration 執行方式）
+- 更新 portfolio-service/Dockerfile（複製 alembic.ini 與 alembic/ 目錄）
+- 新增 portfolio-service/README.md（migration 與測試指令說明，含常見問題）
+- 新增 portfolio-service/verify_setup.sh（一鍵驗證腳本，自動處理表格已存在情況）
+- 新增 portfolio-service/reset_db.sh（資料庫重置腳本）
+- 更新 Development.md 的 Sprint 1-4 說明（使用 docker compose exec）
+- 修正 datetime.utcnow() deprecation warning（改用 datetime.now(timezone.utc)）
+- 修正測試流程：移除 Base.metadata.create_all()，改為驗證 migration 正確性
+- 所有 Docker 命令改用 `docker compose exec` 取代固定容器名稱
+- **Sprint 1-2 前置修復**（2026-01-23 補充）
+  - 雷 A：移除 asyncpg 依賴，Sprint 1 使用同步 SQLAlchemy + psycopg2-binary
+  - 雷 B：引入 transaction-based test fixtures（conftest.py），每個測試自動 rollback 不污染 DB
+  - 雷 C：確認 alembic/env.py 已正確設定 target_metadata = Base.metadata（可正常 autogenerate）
+  - 文件校正：RUNBOOK.md 中的 `docker exec` 全部改為 `docker compose exec`（VM/CI 友善）
 
 ## [0.2.0] - 2026-01-23（Sprint 1-0：文件與契約先行）
 - 新增 portfolio-service 完整 API 契約（API_CONTRACTS.md）
