@@ -8,6 +8,7 @@
 5. 更新 sync_run 狀態
 """
 
+import json
 import uuid
 from typing import Dict, List, Any
 from sqlalchemy.orm import Session
@@ -111,14 +112,37 @@ class SyncService:
             else:
                 skipped_count = errors_count
             
-            # Step 5: 更新 sync_run 狀態（succeeded）
+            # Step 5: 建立錯誤摘要（最多保留前 20 筆）
+            error_message = None
+            if errors_count > 0:
+                error_summary = {
+                    "errors_count": errors_count,
+                    "errors": [
+                        {
+                            "row": failed_row["row_index"],
+                            "reason": failed_row["error"]
+                        }
+                        for failed_row in failed_rows[:20]  # 限制最多 20 筆
+                    ]
+                }
+                error_message = json.dumps(error_summary, ensure_ascii=False)
+            
+            # Step 6: 判斷同步狀態
+            if errors_count == 0:
+                status = "succeeded"
+            elif inserted_count + 0 > 0:  # updated_count 目前固定為 0
+                status = "partial_succeeded"
+            else:
+                status = "failed"
+            
+            # Step 7: 更新 sync_run 狀態
             self.sync_runs_repo.finish_run(
                 run_id=run_id,
-                status="succeeded",
+                status=status,
                 inserted_count=inserted_count,
                 updated_count=0,  # 目前版本不支援更新，固定為 0
                 skipped_count=skipped_count,
-                error_message=None
+                error_message=error_message
             )
             
             return SyncResult(
@@ -127,7 +151,7 @@ class SyncService:
                 updated_count=0,
                 skipped_count=skipped_count,
                 errors_count=errors_count,
-                status="succeeded"
+                status=status
             )
             
         except Exception as e:

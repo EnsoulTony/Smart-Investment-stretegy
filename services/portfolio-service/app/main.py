@@ -1,6 +1,7 @@
 """Portfolio Service 的 FastAPI 進入點。"""
 
 import os
+import logging
 from fastapi import FastAPI, Depends, HTTPException
 from sqlalchemy.orm import Session
 
@@ -9,6 +10,9 @@ from app.sync_service import SyncService
 
 SERVICE_NAME = os.getenv("SERVICE_NAME", "portfolio-service")
 app = FastAPI(title="Portfolio Service", version="0.1.0")
+
+# 設定 logger
+logger = logging.getLogger(__name__)
 
 
 @app.get("/health", tags=["health"])
@@ -56,6 +60,9 @@ def sync_trades(db: Session = Depends(get_db)) -> dict:
         return result.to_dict()
         
     except Exception as e:
+        # 輸出完整 traceback 到 logs
+        logger.exception("Unhandled error in /portfolio/sync: %s", e)
+        
         # 同步失敗：回傳 500 錯誤
         raise HTTPException(
             status_code=500,
