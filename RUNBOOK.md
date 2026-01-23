@@ -56,6 +56,137 @@ echo "$GOOGLE_SA_JSON" | python3 -m json.tool > /dev/null && echo "Valid JSON" |
 | docker compose up 失敗 | `.env` 缺值或埠被占用 | 1. 驗證 `.env` 2. `docker compose config` 3. 釋放埠號 |
 | /portfolio/sync 回傳重複大量跳過 | Google Sheets 未更新 / hash 計算正確 | 檢查 `duplicates_count` 與 `sheet_rows_count`：若相等代表全為舊資料（正常）|
 | /portfolio/sync 出現 errors_count > 0 | Sheets 資料格式錯誤 | 檢查 `normalized_invalid_count` 並查看日誌中的具體錯誤行 |
+| **測試回傳 symbols 為空** | **TestClient 與測試 session 隔離** | **見下方「測試隔離問題」專節** |
+
+### 2.1. 測試隔離問題（Troubleshooting: symbols 為空）
+
+**症狀**：
+- 測試插入 Trade 資料到 db_session
+- 呼叫 API 端點（例如 POST /portfolio/rebuild_positions/preview）
+- API 回傳 `symbols = []`（空陣列），但測試插入的資料確實存在
+
+**根本原因**：
+
+當測試使用 `db_session` fixture（基於 SAVEPOINT / nested transaction）與 FastAPI TestClient 時，會出現兩個獨立的 database session：
+
+1. **測試的 db_session**：使用 SAVEPOINT 機制，`commit()` 只提交到 SAVEPOINT，不是真正寫入 DB
+2. **API 的 get_db()**：FastAPI dependency injection 預設會建立新的 session
+
+因為 transaction 隔離，兩個 session 互相看不到對方的資料。
+
+**正確修法（四個關鍵步驟）**：
+
+**步驟 1：override get_db dependency**
+
+在測試檔案中建立 `client` fixture：
+
+```python
+from app.db import get_db
+from app.main import app
+
+@pytest.fixture
+def client(db_session):
+    """讓 API 與測試共用同一個 db_session"""
+    def override_get_db():
+        yield db_session
+    
+    app.dependency_overrides[get_db] = override_get_db
+    with TestClient(app) as c:
+        yield c
+    app.dependency_overrides.clear()
+```
+
+**步驟 2：使用 context manager**
+
+```python
+with TestClient(app) as c:
+    yield c
+```
+
+確保 lifespan 正確啟停，避免狀態殘留。
+
+**步驟 3：插入後自我驗證**
+
+```python
+# 插入測試資料
+trade = Trade(user_id="test_user", symbol="AAPL", ...)
+db_session.add(trade)
+db_session.commit()
+
+# 自我驗證：確認插入成功（避免把錯誤歸因到 API）
+count = db_session.query(Trade).filter_by(user_id="test_user").count()
+assert count == 1, f"插入失敗，預期 1 筆，實際：{count}"
+
+# 才呼叫 API
+response = client.post("/portfolio/rebuild_positions/preview", ...)
+```
+
+**步驟 4：清除 dependency_overrides**
+
+```python
+app.dependency_overrides.clear()
+assert len(app.dependency_overrides) == 0  # 可選：確保清除成功
+```
+
+**驗證修正是否成功**：
+
+```bash
+# 重建容器（因為 tests/ 被 COPY 進 image）
+docker compose up -d --build portfolio-service
+
+# 執行測試，應該看到 symbols 有資料
+docker compose exec portfolio-service pytest tests/test_rebuild_positions_preview.py -v
+
+# 自我驗證的 count 檢查應該通過（count > 0）
+# API 回傳的 symbols 應該不為空
+```
+
+**參考範例**：
+- `services/portfolio-service/tests/test_rebuild_positions_preview.py`
+- `services/portfolio-service/tests/conftest.py`（db_session fixture 的 SAVEPOINT 機制）
+
+### 2.2. 測試修改後需重建容器
+
+**情況**：
+- 修改 `services/portfolio-service/tests/` 目錄下的測試檔案
+- 在容器內執行測試，發現測試仍使用舊版本程式碼
+
+**原因**：
+
+Dockerfile 在 build 階段 COPY 了整個 `tests/` 目錄：
+
+```dockerfile
+COPY services/portfolio-service/tests /app/tests
+```
+
+因此修改測試檔案後，容器內的檔案不會自動更新。
+
+**解決方案**：
+
+```bash
+# 重建 portfolio-service 容器
+docker compose up -d --build portfolio-service
+
+# 等待容器啟動（約 3-5 秒）
+sleep 3
+
+# 執行測試
+docker compose exec portfolio-service pytest tests/test_rebuild_positions_preview.py -v
+```
+
+**一鍵驗證腳本**：
+
+專案提供了 `test_preview.sh` 腳本自動執行上述流程：
+
+```bash
+chmod +x test_preview.sh
+./test_preview.sh
+```
+
+**注意事項**：
+- 如果只修改 `app/` 目錄（非測試），也需要重建容器
+- 開發時可考慮使用 volume mount（但正式環境不建議）
+- CI/CD pipeline 會自動重建，無需手動處理
 
 ## 3. 重啟與回滾
 

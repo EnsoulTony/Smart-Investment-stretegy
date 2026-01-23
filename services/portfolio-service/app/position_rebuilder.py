@@ -5,19 +5,26 @@
 架構分層：
 - Router (main.py) ➜ 接收 HTTP 請求，處理身份驗證
 - Service (本模組) ➜ 協調業務流程，處理錯誤
-- Calculator (未來 Sprint 1-4.1) ➜ 純函數，實作均價法計算邏輯
-- Repository (repositories/) ➜ 資料庫 CRUD 操作
+- Calculator (avg_cost_calculator.py) ➜ 純函數，實作均價法計算邏輯
+- Repository (trades_repository.py) ➜ 資料庫 CRUD 操作
 
-當前階段（Sprint 1-4.0）：
-- ✅ 建立骨架結構
-- ⏸ 均價法計算邏輯（下階段）
-- ⏸ 外幣折算（下階段）
-- ⏸ positions_snapshot 表寫入（下階段）
+當前階段（Sprint 1-4.2）：
+- ✅ 建立骨架結構（Sprint 1-4.0）
+- ✅ 均價法計算邏輯（Sprint 1-4.1）
+- ✅ DB 查詢與預覽重算（Sprint 1-4.2）
+- ⏸ positions_snapshot 表寫入（Sprint 1-4.3）
+- ⏸ 外幣折算（未來）
 """
 
 import logging
 from sqlalchemy.orm import Session
 from typing import Dict, List
+from decimal import Decimal
+from collections import defaultdict
+
+from app.schemas import TradeRecord
+from app.avg_cost_calculator import compute_avg_cost
+from app.trades_repository import list_trades_for_user
 
 logger = logging.getLogger(__name__)
 
@@ -131,3 +138,154 @@ def rebuild_positions(user_id: str, db: Session) -> Dict:
     """
     rebuilder = PositionRebuilder(session=db)
     return rebuilder.rebuild_positions(user_id=user_id)
+
+
+def preview_rebuild(user_id: str, db: Session) -> Dict:
+    """預覽持倉重算結果（不寫入 DB）。
+    
+    功能：
+    1. 從 trades 表查詢用戶的所有交易記錄
+    2. 按 (symbol, asset_ccy) 分組
+    3. 每組內按 trade_date 排序後呼叫均價法計算器
+    4. 回傳計算結果的預覽資料（JSON 格式）
+    
+    與 rebuild_positions 的差異：
+    - preview_rebuild: 只計算不寫入，回傳詳細資料供檢視
+    - rebuild_positions: 計算後寫入 positions 表（Sprint 1-4.3 實作）
+    
+    使用場景：
+    - 用戶想查看重算結果但不實際執行
+    - 開發/測試時驗證計算邏輯
+    - 提供 API 端點供前端顯示預覽
+    
+    Args:
+        user_id: 使用者 ID
+        db: SQLAlchemy Session
+    
+    Returns:
+        dict: 預覽結果
+            - status: "succeeded" 或 "failed"
+            - user_id: 使用者 ID
+            - symbols: 持倉列表
+              [{
+                "symbol": 股票代碼,
+                "asset_ccy": 幣別,
+                "qty": 持倉數量,
+                "avg_cost": 平均成本,
+                "realized_pnl": 已實現損益,
+                "total_fee": 累計手續費,
+                "trades_count": 交易筆數
+              }]
+            - warnings: 警告訊息列表
+    
+    Raises:
+        ValueError: user_id 為空時
+        Exception: 資料庫查詢或計算失敗時
+    
+    Example:
+        >>> result = preview_rebuild("tony", db)
+        >>> print(f"共 {len(result['symbols'])} 個持倉")
+        >>> for pos in result['symbols']:
+        ...     print(f"{pos['symbol']}: {pos['qty']} 股 @ {pos['avg_cost']}")
+    """
+    if not user_id or not user_id.strip():
+        raise ValueError("user_id 不可為空")
+    
+    logger.info("開始預覽持倉重算，user_id=%s", user_id)
+    
+    try:
+        # 步驟 1: 從 DB 查詢交易記錄
+        trades_orm = list_trades_for_user(db, user_id)
+        logger.info("查詢到 %d 筆交易記錄，user_id=%s", len(trades_orm), user_id)
+        
+        # 步驟 2: 轉換為 TradeRecord（Pydantic 模型）
+        # ORM Trade -> Pydantic TradeRecord（欄位映射）
+        trades_pydantic: List[TradeRecord] = []
+        for trade_orm in trades_orm:
+            try:
+                trade_record = TradeRecord(
+                    user_id=trade_orm.user_id,
+                    symbol=trade_orm.symbol,
+                    asset_ccy=trade_orm.asset_ccy,
+                    side=trade_orm.side,
+                    quantity=trade_orm.quantity,
+                    price=trade_orm.price,
+                    fee=trade_orm.fee,
+                    trade_date=trade_orm.trade_date,
+                    broker=trade_orm.broker
+                )
+                trades_pydantic.append(trade_record)
+            except Exception as e:
+                # 個別交易轉換失敗，記錄警告但繼續處理
+                logger.warning(
+                    "交易記錄轉換失敗，trade_id=%s, error=%s",
+                    trade_orm.id, e
+                )
+        
+        logger.info("成功轉換 %d 筆交易記錄為 TradeRecord", len(trades_pydantic))
+        
+        # 步驟 3: 按 (symbol, asset_ccy) 分組
+        # 使用 defaultdict 自動建立空列表
+        grouped_trades = defaultdict(list)
+        for trade in trades_pydantic:
+            key = (trade.symbol, trade.asset_ccy)
+            grouped_trades[key].append(trade)
+        
+        logger.info("交易記錄分組完成，共 %d 個標的", len(grouped_trades))
+        
+        # 步驟 4: 每組計算均價法
+        symbols_result = []
+        warnings = []
+        
+        for (symbol, asset_ccy), group_trades in grouped_trades.items():
+            try:
+                # 每組已在 repository 層排序（trade_date, created_at）
+                # 直接呼叫均價法計算器
+                state = compute_avg_cost(group_trades)
+                
+                symbols_result.append({
+                    "symbol": symbol,
+                    "asset_ccy": asset_ccy,
+                    "qty": float(state.qty),  # Decimal -> float（JSON 序列化）
+                    "avg_cost": float(state.avg_cost),
+                    "realized_pnl": float(state.realized_pnl),
+                    "total_fee": float(state.total_fee),
+                    "trades_count": len(group_trades)
+                })
+                
+                logger.debug(
+                    "計算完成：symbol=%s, asset_ccy=%s, qty=%s, avg_cost=%s",
+                    symbol, asset_ccy, state.qty, state.avg_cost
+                )
+                
+            except ValueError as e:
+                # 均價法計算失敗（例如：賣出超過持倉）
+                warning_msg = f"標的 {symbol} ({asset_ccy}) 計算失敗：{str(e)}"
+                warnings.append(warning_msg)
+                logger.warning(warning_msg)
+            
+            except Exception as e:
+                # 其他未預期的錯誤
+                warning_msg = f"標的 {symbol} ({asset_ccy}) 發生未預期錯誤：{str(e)}"
+                warnings.append(warning_msg)
+                logger.exception(warning_msg)
+        
+        # 步驟 5: 組裝回傳結果
+        result = {
+            "status": "succeeded",
+            "user_id": user_id,
+            "symbols": symbols_result,
+            "warnings": warnings
+        }
+        
+        logger.info(
+            "預覽重算完成，user_id=%s, symbols_count=%d, warnings_count=%d",
+            user_id, len(symbols_result), len(warnings)
+        )
+        
+        return result
+        
+    except Exception as e:
+        logger.exception("預覽重算失敗，user_id=%s", user_id)
+        raise
+

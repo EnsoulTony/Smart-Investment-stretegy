@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session
 
 from app.db import get_db
 from app.sync_service import SyncService
-from app.position_rebuilder import PositionRebuilder
+from app.position_rebuilder import PositionRebuilder, preview_rebuild
 from app.schemas import RebuildPositionsRequest, RebuildPositionsResponse
 
 SERVICE_NAME = os.getenv("SERVICE_NAME", "portfolio-service")
@@ -125,4 +125,76 @@ def rebuild_positions(
         raise HTTPException(
             status_code=500,
             detail=f"重算持倉失敗：{str(e)}"
+        )
+
+
+@app.post("/portfolio/rebuild_positions/preview", tags=["portfolio"])
+def preview_rebuild_positions(
+    request: RebuildPositionsRequest,
+    db: Session = Depends(get_db)
+) -> dict:
+    """預覽持倉重算結果（不寫入 DB）。
+    
+    功能：
+    - 從 trades 表查詢用戶的所有交易記錄
+    - 按 (symbol, asset_ccy) 分組並計算均價法
+    - 回傳計算結果的預覽資料（不寫入 positions 表）
+    
+    與 POST /portfolio/rebuild_positions 的差異：
+    - preview: 只計算不寫入，回傳詳細資料供檢視
+    - rebuild: 計算後寫入 positions 表（Sprint 1-4.3 實作）
+    
+    使用場景：
+    - 用戶想查看重算結果但不實際執行
+    - 開發/測試時驗證計算邏輯
+    - 前端顯示預覽畫面
+    
+    Args:
+        request: 包含 user_id 的請求 body
+        db: SQLAlchemy Session（依賴注入）
+    
+    Returns:
+        dict: 預覽結果
+            - status: "succeeded" 或 "failed"
+            - user_id: 使用者 ID
+            - symbols: 持倉列表
+              [{
+                "symbol": 股票代碼,
+                "asset_ccy": 幣別,
+                "qty": 持倉數量,
+                "avg_cost": 平均成本,
+                "realized_pnl": 已實現損益,
+                "total_fee": 累計手續費,
+                "trades_count": 交易筆數
+              }]
+            - warnings: 警告訊息列表（計算失敗的標的）
+    
+    Raises:
+        HTTPException:
+            - 422: user_id 缺失或格式錯誤（Pydantic 自動驗證）
+            - 500: 預覽過程發生錯誤
+    
+    Notes:
+        - TODO: 加入身份驗證（JWT/API Key）
+        - 當前階段（Sprint 1-4.2）實作預覽功能
+        - 下階段（Sprint 1-4.3）實作實際寫入
+    """
+    try:
+        result = preview_rebuild(user_id=request.user_id, db=db)
+        return result
+        
+    except ValueError as e:
+        # 驗證錯誤（例如：user_id 為空）
+        logger.warning("預覽重算驗證失敗，user_id=%s, error=%s", request.user_id, e)
+        raise HTTPException(
+            status_code=500,
+            detail=str(e)
+        )
+        
+    except Exception as e:
+        # 其他錯誤（DB 連線失敗、計算錯誤等）
+        logger.exception("預覽重算失敗，user_id=%s", request.user_id)
+        raise HTTPException(
+            status_code=500,
+            detail=f"預覽重算失敗：{str(e)}"
         )

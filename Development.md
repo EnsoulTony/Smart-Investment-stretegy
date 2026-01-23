@@ -270,6 +270,157 @@ Before coding:
 - 寫入 positions_snapshot 表
 - 測試實際計算邏輯的正確性
 
+#### Sprint 1-4.1: 均價法（Weighted Average Cost）純函數計算器與完整單元測試
+
+```markdown
+Task: 實作均價法計算器（純函數）與完整單元測試
+Repo / Files:
+- services/portfolio-service/app/avg_cost_calculator.py（新增）
+- services/portfolio-service/app/schemas.py（更新：TradeRecord）
+- services/portfolio-service/tests/test_avg_cost_calculator.py（新增）
+- Development.md（更新：新增 Sprint 1-4.1 說明）
+
+Constraints:
+- 計算器為純函數（無副作用，不讀寫 DB）
+- 輸入：List[TradeRecord]（已排序）
+- 輸出：AvgCostState（qty, avg_cost, realized_pnl, total_fee）
+- 支援 BUY/SELL 邏輯：
+  - BUY: 增加持倉，更新均價
+  - SELL: 減少持倉，實現損益（avg_cost 不變）
+- 防禦性檢查：賣出數量不可超過持倉
+- 精確計算：使用 Decimal 避免浮點誤差
+- 手續費處理：BUY 增加成本基礎，SELL 減少收益
+
+Tests:
+- pytest services/portfolio-service/tests/test_avg_cost_calculator.py -v
+- 驗證方式：
+  1. docker compose up -d --build portfolio-service
+  2. docker compose exec portfolio-service pytest tests/test_avg_cost_calculator.py -v
+  3. 預期：12 個測試全部通過（涵蓋基本場景、SELL 邏輯、手續費、防禦性檢查、邊界情況）
+
+Before coding:
+- services/portfolio-service/app/avg_cost_calculator.py（約 175 行，包含完整註解與數學公式說明）
+- services/portfolio-service/tests/test_avg_cost_calculator.py（12 個測試，約 450 行）
+```
+
+#### Sprint 1-4.2: DB 查詢整合、預覽重算端點與測試加固
+
+```markdown
+Task: 把均價法計算器接上 DB 查詢與分組排序，並提供「預覽重算」端點與測試
+Repo / Files:
+- services/portfolio-service/app/trades_repository.py（新增）
+- services/portfolio-service/app/position_rebuilder.py（更新：新增 preview_rebuild）
+- services/portfolio-service/app/main.py（新增 POST /portfolio/rebuild_positions/preview 端點）
+- services/portfolio-service/tests/test_rebuild_positions_preview.py（新增）
+- Development.md（更新：新增 Sprint 1-4.2 說明與測試加固指南）
+
+Constraints:
+- 本階段只做「讀 DB trades → 分組排序 → 呼叫 compute_avg_cost → 回傳預覽結果」
+- 不寫入 positions（upsert 留到 Sprint 1-4.3）
+- 不接 Google Sheets、不改 sync、不中斷既有端點
+- 計算仍以 (user_id, symbol, asset_ccy) 分組
+- trades 必須以 trade_date ASC, created_at ASC 排序（確保穩定性）
+
+Tests:
+- pytest services/portfolio-service/tests/test_rebuild_positions_preview.py -v
+- 驗證方式：
+  1. 重建容器（因為 tests/ 被 COPY 進 image）:
+     docker compose up -d --build portfolio-service
+  2. 執行預覽端點測試:
+     docker compose exec portfolio-service pytest tests/test_rebuild_positions_preview.py -v
+  3. 執行完整測試套件:
+     docker compose exec portfolio-service pytest -q
+  4. 預期：55 個測試全部通過（48 既有 + 7 個預覽測試）
+
+Before coding:
+- services/portfolio-service/app/trades_repository.py（約 77 行，二級排序邏輯）
+- services/portfolio-service/app/position_rebuilder.py（新增 preview_rebuild 函數，約 150 行）
+- services/portfolio-service/app/main.py（新增預覽端點，約 70 行）
+- services/portfolio-service/tests/test_rebuild_positions_preview.py（7 個測試，約 330 行）
+```
+
+**測試加固指南（Sprint 1-4.2 必讀）**
+
+當測試涉及 FastAPI TestClient + Database Session + Transaction（SAVEPOINT）時，需特別注意以下四點：
+
+**1. 必須 override get_db dependency**
+
+```python
+from app.db import get_db
+from app.main import app
+
+@pytest.fixture
+def client(db_session):
+    """讓 API 與測試共用同一個 db_session（避免 SAVEPOINT 隔離）"""
+    def override_get_db():
+        yield db_session
+    
+    app.dependency_overrides[get_db] = override_get_db
+    with TestClient(app) as c:  # 使用 context manager
+        yield c
+    app.dependency_overrides.clear()
+```
+
+**為什麼需要？**
+- conftest.py 的 `db_session` 使用 SAVEPOINT（nested transaction）
+- 測試中的 `commit()` 只提交到 SAVEPOINT，不是真正寫入 DB
+- 如果 TestClient 用另一個 session（預設行為），會因為 transaction 隔離看不到測試插入的資料
+- 症狀：API 查詢回傳空結果（`symbols = []`），但測試插入的資料確實存在
+
+**2. 必須使用 context manager**
+
+```python
+with TestClient(app) as c:
+    yield c
+```
+
+確保 TestClient 的 lifespan 正確啟停，避免狀態殘留。
+
+**3. 插入後必須自我驗證**
+
+```python
+# 插入測試資料
+trade = Trade(user_id="test_user", symbol="AAPL", ...)
+db_session.add(trade)
+db_session.commit()
+
+# 自我驗證：確認資料真的插入成功（避免把錯誤歸因到 API）
+count = db_session.query(Trade).filter_by(user_id="test_user").count()
+assert count == 1, f"插入失敗或 rollback 太早，預期 1 筆，實際：{count}"
+
+# 才呼叫 API
+response = client.post("/portfolio/rebuild_positions/preview", ...)
+```
+
+**4. fixture teardown 必須清除 dependency_overrides**
+
+```python
+@pytest.fixture
+def client(db_session):
+    def override_get_db():
+        yield db_session
+    
+    app.dependency_overrides[get_db] = override_get_db
+    with TestClient(app) as c:
+        yield c
+    app.dependency_overrides.clear()  # 必須清除，避免污染其他測試
+```
+
+可選：加上 assert 確保清除成功
+
+```python
+app.dependency_overrides.clear()
+assert len(app.dependency_overrides) == 0, "dependency_overrides 未清除乾淨"
+```
+
+**重建容器的必要性**
+
+因為 Dockerfile COPY 了 `tests/` 目錄，修改測試檔案需要重建容器：
+
+```bash
+docker compose up -d --build portfolio-service
+```
+
 ### Sprint 1-5: Portfolio 資料庫 Schema 與 Migration
 ```markdown
 Task: 建立 portfolio-service 的資料庫 schema 與 migration 腳本
