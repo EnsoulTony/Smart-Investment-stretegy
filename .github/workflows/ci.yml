@@ -75,6 +75,14 @@ jobs:
       - name: Build and run tests in Docker
         run: |
           docker compose up -d --build postgres portfolio-service
+          
+          # 等待 Postgres 就绪
+          docker compose exec -T postgres sh -c 'until pg_isready -U investment; do sleep 1; done'
+          
+          # 执行 Alembic migration（创建表结构）
+          docker compose exec -T portfolio-service alembic upgrade head
+          
+          # 运行测试
           docker compose exec -T portfolio-service pytest -q
         
       - name: Cleanup
