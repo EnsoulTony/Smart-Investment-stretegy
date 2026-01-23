@@ -112,7 +112,7 @@ class SyncService:
             else:
                 skipped_count = errors_count
             
-            # Step 5: 建立錯誤摘要（最多保留前 20 筆）
+            # Step 5: 建立錯誤摘要（最多保留前 20 筆，包含原始資料）
             error_message = None
             if errors_count > 0:
                 error_summary = {
@@ -120,7 +120,8 @@ class SyncService:
                     "errors": [
                         {
                             "row": failed_row["row_index"],
-                            "reason": failed_row["error"]
+                            "reason": failed_row["error"],
+                            "raw": failed_row["raw_data"]
                         }
                         for failed_row in failed_rows[:20]  # 限制最多 20 筆
                     ]

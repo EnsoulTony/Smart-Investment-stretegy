@@ -110,14 +110,38 @@ class TradeNormalizer:
             if all(not str(v).strip() for v in row_dict.values()):
                 continue
             
+            # 表頭/空行防呆：檢查關鍵欄位 symbol
+            symbol_value = None
+            for standard_col, sheet_col in self.column_mapping.items():
+                if standard_col == "symbol":
+                    symbol_value = row_dict.get(sheet_col) or row_dict.get("symbol")
+                    break
+            
+            # 若 symbol 為空或看起來是表頭（常見表頭詞），直接跳過不計入錯誤
+            if not symbol_value or str(symbol_value).strip().upper() in ["", "SYMBOL", "股票代碼", "代碼", "TICKER"]:
+                continue
+            
             trade_record, error = self.normalize_row(row_dict)
             
             if trade_record:
                 success_records.append(trade_record)
             else:
+                # 收集關鍵欄位原始資料（處理 None/NaN）
+                raw_data_snippet = {}
+                key_fields = ["user_id", "symbol", "asset_ccy", "side", "quantity", "price", "fee", "trade_date", "broker"]
+                for field in key_fields:
+                    sheet_col = self.column_mapping.get(field)
+                    value = row_dict.get(sheet_col) or row_dict.get(field)
+                    # 處理 None/NaN/空值
+                    if value is None or (isinstance(value, float) and str(value).lower() == 'nan'):
+                        raw_data_snippet[field] = ""
+                    else:
+                        # 截斷過長字串（最多 100 字元）
+                        raw_data_snippet[field] = str(value)[:100] if value else ""
+                
                 failed_rows.append({
                     "row_index": idx,
-                    "raw_data": row_dict,
+                    "raw_data": raw_data_snippet,
                     "error": error
                 })
         
