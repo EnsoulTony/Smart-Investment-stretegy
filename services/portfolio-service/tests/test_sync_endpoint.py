@@ -233,7 +233,7 @@ class TestSyncEndpoint:
         assert response.status_code == 200
         data = response.json()
         
-        assert data["status"] == "succeeded"  # 整體成功（部分資料有效）
+        assert data["status"] == "partial_succeeded"  # 部分成功（有資料被跳過）
         assert data["inserted_count"] == 2   # 2 筆有效資料插入
         assert data["errors_count"] == 1      # 1 筆驗證失敗
         assert data["skipped_count"] == 1     # 1 筆被跳過（errors_count）

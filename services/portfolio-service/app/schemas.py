@@ -6,7 +6,7 @@
 from pydantic import BaseModel, Field, field_validator, ConfigDict
 from datetime import datetime
 from decimal import Decimal
-from typing import Optional
+from typing import Optional, List
 
 
 class TradeRecord(BaseModel):
@@ -125,3 +125,21 @@ class TradeRecord(BaseModel):
         arbitrary_types_allowed=True,
         # Pydantic V2: json_encoders 已棄用，Decimal 會自動序列化為 float
     )
+
+
+class RebuildPositionsRequest(BaseModel):
+    """持倉重算請求資料模型。
+    
+    用於 POST /portfolio/rebuild_positions 端點。
+    """
+    user_id: str = Field(..., min_length=1, description="使用者 ID，不可為空")
+
+
+class RebuildPositionsResponse(BaseModel):
+    """持倉重算回應資料模型。
+    
+    用於 POST /portfolio/rebuild_positions 端點回應。
+    """
+    status: str = Field(..., description="執行狀態：succeeded 或 failed")
+    rebuilt_symbols_count: int = Field(..., ge=0, description="重算的標的數量")
+    warnings: List[str] = Field(default_factory=list, description="警告訊息列表")

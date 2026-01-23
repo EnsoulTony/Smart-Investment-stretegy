@@ -7,6 +7,8 @@ from sqlalchemy.orm import Session
 
 from app.db import get_db
 from app.sync_service import SyncService
+from app.position_rebuilder import PositionRebuilder
+from app.schemas import RebuildPositionsRequest, RebuildPositionsResponse
 
 SERVICE_NAME = os.getenv("SERVICE_NAME", "portfolio-service")
 app = FastAPI(title="Portfolio Service", version="0.1.0")
@@ -67,4 +69,60 @@ def sync_trades(db: Session = Depends(get_db)) -> dict:
         raise HTTPException(
             status_code=500,
             detail=f"同步失敗：{str(e)}"
+        )
+
+
+@app.post("/portfolio/rebuild_positions", tags=["portfolio"], response_model=RebuildPositionsResponse)
+def rebuild_positions(
+    request: RebuildPositionsRequest,
+    db: Session = Depends(get_db)
+) -> dict:
+    """重算指定用戶的持倉狀態。
+    
+    從 trades 表重新計算當前持倉數量、平均成本與已實現損益。
+    
+    流程（當前階段僅骨架）：
+    1. 讀取該用戶的所有交易記錄
+    2. 按 symbol 分組並依序計算（下階段實作均價法）
+    3. 寫入 positions_snapshot 表（下階段實作）
+    
+    Args:
+        request: 包含 user_id 的請求 body
+        db: SQLAlchemy Session（依賴注入）
+    
+    Returns:
+        dict: 重算結果
+            - status: 執行狀態（"succeeded" 或 "failed"）
+            - rebuilt_symbols_count: 重算的標的數量
+            - warnings: 警告訊息列表
+    
+    Raises:
+        HTTPException:
+            - 422: user_id 缺失或格式錯誤（Pydantic 自動驗證）
+            - 500: 重算過程發生錯誤
+    
+    Notes:
+        - TODO: 加入身份驗證（JWT/API Key）
+        - 當前階段（Sprint 1-4.0）僅回傳固定結構
+        - 下階段（Sprint 1-4.1）將實作均價法計算邏輯
+    """
+    try:
+        rebuilder = PositionRebuilder(session=db)
+        result = rebuilder.rebuild_positions(user_id=request.user_id)
+        return result
+        
+    except ValueError as e:
+        # 驗證錯誤（例如：user_id 為空）
+        logger.warning("重算持倉驗證失敗，user_id=%s, error=%s", request.user_id, e)
+        raise HTTPException(
+            status_code=500,
+            detail=str(e)
+        )
+        
+    except Exception as e:
+        # 其他錯誤（DB 連線失敗、計算錯誤等）
+        logger.exception("重算持倉失敗，user_id=%s", request.user_id)
+        raise HTTPException(
+            status_code=500,
+            detail=f"重算持倉失敗：{str(e)}"
         )

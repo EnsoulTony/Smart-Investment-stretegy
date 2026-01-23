@@ -222,7 +222,55 @@ Before coding:
 - API_CONTRACTS.md (更新：errors_count 欄位說明)
 ```
 
-### Sprint 1-4: Portfolio 資料庫 Schema 與 Migration
+### Sprint 1-4: 持倉重算端點（Positions Rebuilder）
+
+#### Sprint 1-4.0: 建立重算骨架與最小測試
+
+```markdown
+Task: 建立 POST /portfolio/rebuild_positions 端點骨架與測試
+Repo / Files:
+- services/portfolio-service/app/position_rebuilder.py（新增）
+- services/portfolio-service/app/main.py（新增端點）
+- services/portfolio-service/app/schemas.py（新增 Request/Response schema）
+- services/portfolio-service/tests/test_rebuild_positions_endpoint.py（新增）
+- Development.md（更新：新增 Sprint 1-4.0 說明）
+
+Constraints:
+- 本階段只建立骨架，不實作均價法計算邏輯
+- 端點須能正常回應，回傳固定結構：{"status": "succeeded", "rebuilt_symbols_count": 0, "warnings": []}
+- 架構分層：Router → Service → Calculator（下階段） → Repository
+- 保留 DB session 依賴注入介面（即使本階段不使用）
+- 繁體中文註解，說明下階段會加入的邏輯點
+
+Tests:
+- pytest services/portfolio-service/tests/test_rebuild_positions_endpoint.py -v
+- 驗證方式：
+  1. 啟動服務（若需要）: docker compose up -d portfolio-service
+  2. 執行測試: docker compose exec portfolio-service pytest tests/test_rebuild_positions_endpoint.py -v
+  3. 或執行完整測試套件: docker compose exec portfolio-service pytest -q
+  4. 預期結果：
+     - test_rebuild_positions_endpoint_exists: ✓ 端點存在並回應 200
+     - test_rebuild_positions_response_structure: ✓ 回應包含 status, rebuilt_symbols_count, warnings
+     - test_rebuild_positions_status_succeeded: ✓ status=succeeded, count=0, warnings=[]
+     - test_rebuild_positions_missing_user_id: ✓ 缺少 user_id 回傳 422
+     - test_rebuild_positions_empty_user_id: ✓ 空 user_id 回傳 500
+     - test_rebuild_positions_with_different_user_ids: ✓ 不同 user_id 都能正常回應
+
+Before coding:
+- services/portfolio-service/app/position_rebuilder.py (新增 150+ 行，包含完整註解與 TODO 標記)
+- services/portfolio-service/app/main.py (新增 POST /portfolio/rebuild_positions 端點，約 30 行)
+- services/portfolio-service/app/schemas.py (新增 RebuildPositionsRequest/Response，約 15 行)
+- services/portfolio-service/tests/test_rebuild_positions_endpoint.py (新增 6 個測試，約 100 行)
+- Development.md (新增 Sprint 1-4.0 段落)
+```
+
+**下階段預告（Sprint 1-4.1）**：
+- 實作均價法純函數 `calculate_avg_cost()`
+- 讀取 trades 表並按 symbol 分組計算
+- 寫入 positions_snapshot 表
+- 測試實際計算邏輯的正確性
+
+### Sprint 1-5: Portfolio 資料庫 Schema 與 Migration
 ```markdown
 Task: 建立 portfolio-service 的資料庫 schema 與 migration 腳本
 Repo / Files:
