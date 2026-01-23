@@ -12,6 +12,20 @@
 }
 ```
 
+### `POST /portfolio/sync`
+轉發至 portfolio-service 的同步端點。參見 [2. portfolio-service](#2-portfolio-service) 的 API 規格。
+
+### `GET /portfolio/health`
+轉發至 portfolio-service 的健康檢查端點。
+
+**Response 200 OK**
+```json
+{
+  "status": "ok",
+  "service": "portfolio-service"
+}
+```
+
 ### `GET /dashboard`
 ```json
 {
@@ -64,7 +78,7 @@ POST /portfolio/sync
 ```
 
 **說明：**
-- `status`: "succeeded" | "failed"
+- `status`: "succeeded" | "failed" | "partial_succeeded"
 - `inserted_count`: 成功插入的交易記錄數量
 - `skipped_count`: 因 source_hash 重複跳過的記錄（去重）
 - `errors_count`: 驗證失敗的記錄數量（例如：quantity=0、缺少欄位）

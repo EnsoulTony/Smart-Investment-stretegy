@@ -20,9 +20,12 @@ Smart-Investment-Strategy 採微服務架構，分為前端、API Gateway、四�
 
 - **Frontend**：RWD 戰情室 UI，透過 `api-gateway` 取得資料。
 - **api-gateway**：
-  - JWT 驗證（簡易登入）。
-  - 聚合 portfolio/radar/news/research 的資料，對前端提供單一 API。
-  - 註：未來可考慮將 BFF（Backend for Frontend）邏輯抽出成獨立服務 (TODO)
+  - 反向代理（BFF），將請求轉發至後端服務。
+  - 目前提供：
+    - `POST /portfolio/sync` → portfolio-service
+    - `GET /portfolio/health` → portfolio-service
+  - JWT 驗證（簡易登入）（TODO）。
+  - 聚合 portfolio/radar/news/research 的資料，對前端提供單一 API（TODO）。
 - **portfolio-service**：
   - 管理 `trades`、`positions_snapshot`、均價法計算。
   - 與 Google Sheets 同步資料。
