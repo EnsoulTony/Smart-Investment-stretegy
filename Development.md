@@ -149,24 +149,37 @@ Before coding:
 ```markdown
 Task: 建立 portfolio-service 的資料庫 schema 與 migration 腳本
 Repo / Files:
-- services/portfolio-service/migrations/001_init_schema.sql
+- services/portfolio-service/alembic/versions/001_initial_schema.py
 - services/portfolio-service/app/db.py
+- services/portfolio-service/app/models.py
+- services/portfolio-service/tests/test_db_schema.py
 Constraints:
+- 使用 Alembic 管理 migration
 - 建立 trades 表（參考 API_CONTRACTS.md schema）
-- 建立 positions_snapshot 表（參考 API_CONTRACTS.md schema）
+- 建立 positions 表（參考 API_CONTRACTS.md schema）
+- 建立 sync_runs 表（記錄同步執行）
 - 建立必要的 index（user_id, symbol, trade_date）
-- 建立 unique constraint 避免重複交易記錄
+- 建立 unique constraint 避免重複交易記錄（source_hash）
 Tests:
-- 手動執行 migration 腳本
+- pytest services/portfolio-service/tests/test_db_schema.py
 - 驗證方式：
-  1. 連線到 Postgres: docker exec -it <postgres-container> psql -U postgres
-  2. 執行 migration: \i /migrations/001_init_schema.sql
-  3. 檢查表格建立: \dt
-  4. 檢查欄位定義: \d trades, \d positions_snapshot
-  5. 檢查 index 與 constraint: \di
+  1. 啟動 docker compose: make docker-up
+  2. 進入 portfolio-service 容器執行 migration:
+     docker exec -it smart-investment-strategy-portfolio-service-1 alembic upgrade head
+  3. 執行測試: 
+     docker exec -it smart-investment-strategy-portfolio-service-1 pytest tests/test_db_schema.py -v
+  4. 或在本機執行（需設定 DATABASE_URL）:
+     cd services/portfolio-service
+     export DATABASE_URL=postgresql://investment:investment@localhost:5432/investment_db
+     alembic upgrade head
+     pytest tests/test_db_schema.py -v
 Before coding:
-- services/portfolio-service/migrations/001_init_schema.sql (完整 schema 定義)
-- services/portfolio-service/app/db.py (新增 DB 連線與基礎操作)
+- services/portfolio-service/alembic.ini (Alembic 設定)
+- services/portfolio-service/alembic/env.py (環境設定)
+- services/portfolio-service/alembic/versions/001_initial_schema.py (初始 schema)
+- services/portfolio-service/app/db.py (SQLAlchemy engine/session)
+- services/portfolio-service/app/models.py (ORM models)
+- services/portfolio-service/tests/test_db_schema.py (schema 測試)
 ```
 
 ### Sprint 1-5: 整合測試與文件驗證

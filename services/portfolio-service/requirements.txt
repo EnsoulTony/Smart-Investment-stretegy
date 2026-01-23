@@ -1,1 +1,5 @@
-# 針對 Portfolio 服務的額外依賴（目前預留，未使用）
+# 針對 Portfolio 服務的額外依賴
+sqlalchemy>=2.0.0,<3.0.0
+alembic>=1.13.0,<2.0.0
+asyncpg>=0.29.0,<1.0.0
+psycopg2-binary>=2.9.9,<3.0.0
