@@ -11,6 +11,40 @@
 5. `docker compose exec postgres pg_isready`
 6. 檢查最新 `recommendations`、`news_signals` 是否更新（可透過 SQL 或 API）
 
+### 1.1. VM 環境變數配置檢查（Portfolio Service 相關）
+
+**必要環境變數**（在 VM 的 `.env` 檔案中）：
+
+```bash
+# Postgres 連線
+DATABASE_URL=postgresql://investment:${DB_PASSWORD}@postgres:5432/investment_db
+
+# Google Sheets 同步（Service Account JSON）
+GOOGLE_SA_JSON={"type":"service_account",...}
+
+# Google Sheets 識別資訊
+GOOGLE_SHEET_ID=<your-sheet-id>
+GOOGLE_SHEET_NAME=<sheet-name>
+
+# 欄位 mapping（可選，預設值如下）
+SHEET_COL_SYMBOL=代號
+SHEET_COL_NAME=名稱
+SHEET_COL_QUANTITY=股數
+SHEET_COL_PRICE=成本
+SHEET_COL_DATE=日期
+SHEET_COL_SIDE=買/賣
+```
+
+**驗證指令**：
+```bash
+# 檢查是否設定（不顯示內容）
+test -n "$GOOGLE_SA_JSON" && echo "GOOGLE_SA_JSON is set" || echo "Missing GOOGLE_SA_JSON"
+test -n "$GOOGLE_SHEET_ID" && echo "GOOGLE_SHEET_ID is set" || echo "Missing GOOGLE_SHEET_ID"
+
+# 驗證 JSON 格式是否正確
+echo "$GOOGLE_SA_JSON" | python3 -m json.tool > /dev/null && echo "Valid JSON" || echo "Invalid JSON"
+```
+
 ## 2. 異常排查對照表
 
 | 症狀 | 可能原因 | 處理步驟 |
@@ -20,6 +54,8 @@
 | 新聞/研究訊號缺漏 | GDELT/RSS 限制 | 重啟對應服務並檢查 API 金鑰 |
 | Postgres 空間不足 | 快照過多 | `docker compose exec postgres du -sh /var/lib/postgresql/data` → 清理舊備份或擴容 |
 | docker compose up 失敗 | `.env` 缺值或埠被占用 | 1. 驗證 `.env` 2. `docker compose config` 3. 釋放埠號 |
+| /portfolio/sync 回傳重複大量跳過 | Google Sheets 未更新 / hash 計算正確 | 檢查 `duplicates_count` 與 `sheet_rows_count`：若相等代表全為舊資料（正常）|
+| /portfolio/sync 出現 errors_count > 0 | Sheets 資料格式錯誤 | 檢查 `normalized_invalid_count` 並查看日誌中的具體錯誤行 |
 
 ## 3. 重啟與回滾
 
@@ -39,6 +75,27 @@
 	- 每週同步至物件儲存（S3/GCS）
 - `.env`、systemd 服務檔：存於 `/etc/radar/` 並納入私有備份 repo。
 - 關鍵表：`recommendations`, `analysis_runs`, `news_signals`, `research_signals` 需月度冷備。
+
+### 4.1. 資料庫清空與重建流程（Portfolio Service）
+
+⚠️ **僅用於開發/測試環境**，正式環境需先備份
+
+```bash
+# 1. 停止 portfolio-service
+docker compose stop portfolio-service
+
+# 2. 清空 trades 與 sync_runs 表
+docker compose exec postgres psql -U investment -d investment_db -c "TRUNCATE TABLE trades, sync_runs RESTART IDENTITY CASCADE;"
+
+# 3. （可選）重新執行 migration
+docker compose exec portfolio-service alembic downgrade base
+docker compose exec portfolio-service alembic upgrade head
+
+# 4. 重啟服務
+docker compose start portfolio-service
+```
+
+驗證：`curl http://localhost:8001/health` 應回傳 200。
 
 ## 5. systemd timer（保底部署）
 
@@ -76,7 +133,37 @@ sudo /opt/radar-warroom/infra/vm/deploy.sh
 
 # 匯出 Postgres 備份
 docker compose exec -T postgres pg_dump -U investment investment_db > backups/$(date +%F).sql
+
+# 執行 portfolio-service 驗收腳本
+bash services/portfolio-service/verify_sprint_1-3.sh
+
+# 查看最近一次 sync 的可觀測性資料
+docker compose exec portfolio-service python -c "
+from app.db import get_db_session
+from app.models import SyncRun
+with get_db_session() as session:
+    latest = session.query(SyncRun).order_by(SyncRun.started_at.desc()).first()
+    if latest:
+        print(f'sheet_rows: {latest.sheet_rows_count}, valid: {latest.normalized_valid_count}, invalid: {latest.normalized_invalid_count}, duplicates: {latest.duplicates_count}')
+"
 ```
+
+## 9. Portfolio Service 可觀測性欄位參考（v0.2.3+）
+
+| 欄位 | 說明 | 正常範圍 | 異常判斷 |
+| --- | --- | --- | --- |
+| `sheet_rows_count` | Google Sheets 總列數 | > 0 | = 0 代表連線失敗或空表 |
+| `normalized_valid_count` | 成功轉換的筆數 | = inserted + duplicates | < sheet_rows 代表有格式錯誤 |
+| `normalized_invalid_count` | 格式錯誤筆數 | = 0 | > 0 時檢查日誌找出錯誤行 |
+| `duplicates_count` | 重複跳過筆數（hash 去重） | ≥ 0 | 若 = sheet_rows 代表全為舊資料 |
+| `inserted_count` | 新插入筆數 | ≥ 0 | = 0 時檢查是否 Sheets 未更新 |
+
+### Hash 版本控制機制（CANONICAL_VERSION="v1"）
+
+- `source_hash` 由 `v1:<SHA-256>` 組成，用於去重
+- 若未來欄位標準化規則改變（例如台股代號補零規則），需升級為 `v2`
+- 不同版本的 hash 不會衝突，可安全共存於同一資料表
+- **操作建議**：若需要重新計算所有交易的 hash，應在低峰時段進行批次更新
 好，下面這一份是可直接放進 repo、可直接 commit 的正式版 RUNBOOK.md（安裝與驗證篇）。
 我用的是「工程交接等級」的寫法，不是教學文，重點是 可重現、可驗證、可排錯。
 
