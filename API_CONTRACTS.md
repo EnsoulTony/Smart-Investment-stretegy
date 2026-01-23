@@ -46,25 +46,29 @@
 從 Google Sheets 同步交易流水帳到資料庫。
 
 **Request**
-```json
-{
-  "user_id": "user-uuid",
-  "sheet_url": "https://docs.google.com/spreadsheets/d/...",
-  "force_full_sync": false
-}
+```bash
+POST /portfolio/sync
+# 不需要 body（從環境變數讀取 Google Sheets 資訊）
 ```
 
 **Response 200 OK**
 ```json
 {
-  "status": "success",
+  "status": "succeeded",
   "run_id": "sync-run-uuid",
   "inserted_count": 15,
-  "updated_count": 2,
   "skipped_count": 3,
+  "errors_count": 0,
   "synced_at": "2026-01-23T10:30:00Z"
 }
 ```
+
+**說明：**
+- `status`: "succeeded" | "failed"
+- `inserted_count`: 成功插入的交易記錄數量
+- `skipped_count`: 因 source_hash 重複跳過的記錄（去重）
+- `errors_count`: 驗證失敗的記錄數量（例如：quantity=0、缺少欄位）
+- `synced_at`: 同步完成時間（ISO 8601 格式）
 
 **Error 400 Bad Request**
 ```json

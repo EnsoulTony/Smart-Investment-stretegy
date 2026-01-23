@@ -9,6 +9,7 @@
 from datetime import datetime, timezone
 from sqlalchemy import Column, Integer, String, Numeric, DateTime, Text, UniqueConstraint, Index
 from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.orm import synonym
 import uuid
 
 from app.db import Base
@@ -78,3 +79,6 @@ class SyncRun(Base):
     updated_count = Column(Integer, nullable=False, default=0)
     skipped_count = Column(Integer, nullable=False, default=0)
     error_message = Column(Text, nullable=True)
+    
+    # Synonym: 讓 created_at 指向 started_at（相容性，測試中使用）
+    created_at = synonym("started_at")

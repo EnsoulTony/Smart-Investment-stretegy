@@ -53,7 +53,7 @@ class TradeNormalizer:
         """標準化單一列資料。
         
         Args:
-            row_dict: 原始列資料（key 為 Google Sheets 的欄位名稱）
+            row_dict: 原始列資料（key 為 Google Sheets 的欄位名稱或 canonical key）
         
         Returns:
             Tuple[Optional[TradeRecord], Optional[str]]:
@@ -61,12 +61,17 @@ class TradeNormalizer:
                 - 失敗：(None, 錯誤訊息)
         """
         try:
-            # 根據 column_mapping 提取資料
+            # 根據 column_mapping 提取資料，支援 fallback 到 canonical key
             mapped_data = {}
             for standard_col, sheet_col in self.column_mapping.items():
-                if sheet_col not in row_dict:
-                    return None, f"缺少必要欄位：{sheet_col}"
-                mapped_data[standard_col] = row_dict[sheet_col]
+                # 優先使用 mapping 欄位，若不存在則嘗試使用 canonical key（測試用）
+                if sheet_col in row_dict:
+                    mapped_data[standard_col] = row_dict[sheet_col]
+                elif standard_col in row_dict:
+                    # Fallback: 直接使用 canonical key（例如測試提供的 mock dict）
+                    mapped_data[standard_col] = row_dict[standard_col]
+                else:
+                    return None, f"缺少必要欄位：{sheet_col}（或 {standard_col}）"
             
             # 使用 Pydantic 驗證與轉換
             trade_record = TradeRecord(**mapped_data)

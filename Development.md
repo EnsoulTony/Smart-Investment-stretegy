@@ -158,30 +158,59 @@ Before coding:
 - SECURITY.md (新增 Service Account 金鑰管理說明)
 ```
 
-### Sprint 1-3: 實作 GET /portfolio/trades
+### Sprint 1-3: 完成 POST /portfolio/sync 串接與去重邏輯 ✅
 ```markdown
-Task: 實作 portfolio-service 的 GET /portfolio/trades 端點
+Task: 實作 portfolio-service 的 POST /portfolio/sync 端點（Repository/Service 架構）
 Repo / Files:
-- services/portfolio-service/app/main.py
-- services/portfolio-service/tests/test_trades.py
-Constraints:
-- 遵循 API_CONTRACTS.md 定義的 Response schema
-- 支援 query parameters 篩選：user_id (必填)、symbol (選填)、since (選填)
-- since 參數需驗證格式（YYYY-MM-DD）
-- 回傳結果依 trade_date 降冪排序
+- services/portfolio-service/app/main.py (POST /portfolio/sync 端點)
+- services/portfolio-service/app/sync_service.py (協調器：orchestrate sync 流程)
+- services/portfolio-service/app/repositories/trades_repo.py (TradesRepository: bulk_insert_trades)
+- services/portfolio-service/app/repositories/sync_runs_repo.py (SyncRunsRepository: create_run, finish_run)
+- services/portfolio-service/tests/test_sync_endpoint.py (monkeypatch SheetsClient 測試)
+
+實作要點：
+1. Repository 層：
+   - TradesRepository.bulk_insert_trades() 使用 PostgreSQL INSERT...ON CONFLICT (source_hash) DO NOTHING
+   - 回傳 (inserted_count, skipped_count) tuple
+   - 處理 timezone：naive datetime → add UTC tzinfo for DB
+
+2. Service 層：
+   - SyncService.run_sync() 協調完整流程：
+     * create_run → fetch_sheets → normalize_rows → bulk_insert → finish_run
+   - SyncResult data class 包含 run_id, inserted/skipped/errors_count, status
+   - 例外處理：標記 sync_run status="failed" 後重新拋出
+
+3. API 層：
+   - POST /portfolio/sync 不需 body（從環境變數讀取 Google Sheets 資訊）
+   - 回傳 JSON: {run_id, inserted_count, skipped_count, errors_count, status, synced_at}
+   - 整合錯誤處理：回傳 500 + 錯誤訊息
+
+4. 測試策略（monkeypatch SheetsClient）：
+   - test_first_sync_inserts_all_records: 3 筆全插入
+   - test_second_sync_skips_duplicates: 相同資料全跳過（source_hash 去重）
+   - test_sync_with_invalid_data: errors_count > 0 但 status=succeeded
+   - test_sync_google_sheets_connection_failure: 回傳 500
+   - test_sync_creates_sync_run_record: 驗證 sync_runs 表記錄
+
 Tests:
-- pytest services/portfolio-service/tests/test_trades.py
+- pytest services/portfolio-service/tests/test_sync_endpoint.py -v
 - 驗證方式：
-  1. 準備測試資料（trades 表插入多筆記錄）
-  2. 測試無篩選條件查詢
-  3. 測試 symbol 篩選
-  4. 測試 since 篩選
-  5. 測試組合篩選
-  6. 測試無效 since 格式回傳 400
+  1. 啟動服務: docker compose up -d --build postgres portfolio-service
+  2. 執行 migration: docker compose exec portfolio-service alembic upgrade head
+  3. 執行測試: docker compose exec portfolio-service pytest tests/test_sync_endpoint.py -v
+  4. 手動驗證（需設定 GOOGLE_SA_JSON）:
+     curl -X POST http://localhost:8001/portfolio/sync
+  5. 一鍵驗證腳本:
+     bash services/portfolio-service/verify_sprint_1-3.sh
+
 Before coding:
-- services/portfolio-service/app/main.py (新增 /portfolio/trades 端點，約 30-50 行)
-- services/portfolio-service/app/db.py (新增 trades 查詢邏輯，支援篩選條件)
-- services/portfolio-service/tests/test_trades.py (完整測試各種篩選組合)
+- services/portfolio-service/app/repositories/__init__.py (module exports)
+- services/portfolio-service/app/repositories/trades_repo.py (118 lines, ON CONFLICT logic)
+- services/portfolio-service/app/repositories/sync_runs_repo.py (120 lines, status tracking)
+- services/portfolio-service/app/sync_service.py (153 lines, orchestration flow)
+- services/portfolio-service/app/main.py (更新：新增 POST /portfolio/sync 端點)
+- services/portfolio-service/tests/test_sync_endpoint.py (5 個測試案例，約 280 lines)
+- API_CONTRACTS.md (更新：errors_count 欄位說明)
 ```
 
 ### Sprint 1-4: Portfolio 資料庫 Schema 與 Migration
