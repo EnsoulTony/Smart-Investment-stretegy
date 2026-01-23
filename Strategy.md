@@ -2,6 +2,43 @@
 
 本文件定義 Radar v1.4 的策略邊界、抽換規則、因子群組與指標計算方式，適用於 services/radar-service 及任何引用 Strategy Engine 的服務。
 
+## Portfolio Service 與 Radar Service 邊界
+
+### Portfolio Service 職責
+- 管理交易流水帳（`trades` 表）。
+- 計算均價法持倉（`positions_snapshot` 表）。
+- 產出持倉快照，包含以下欄位：
+  - `user_id`: 使用者 ID
+  - `symbol`: 股票代號
+  - `asset_ccy`: 資產幣別
+  - `quantity`: 持有數量
+  - `avg_cost`: 平均成本
+  - `realized_pnl`: 已實現損益
+  - `unrealized_pnl`: 未實現損益（需搭配市價計算）
+  - `last_updated_at`: 最後更新時間
+
+### Radar Service 職責
+- **只讀取** `positions_snapshot` 表，取得最新持倉快照。
+- **不直接接觸** `trades` 表，避免與 portfolio-service 耦合。
+- 讀取 `indicator_values` 表（例如 `RS_XLU_XLK`、`drawdown_pct`）。
+- 執行策略引擎分析，產出 `analysis_runs` 與 `recommendations`。
+
+### 資料流向
+```
+[Google Sheets] 
+    ↓
+[portfolio-service] → 寫入 trades → 計算 positions_snapshot
+                                          ↓
+                                    [radar-service] 讀取 positions_snapshot + indicator_values
+                                          ↓
+                                    產出 recommendations
+```
+
+### 重要原則
+- **單一資料來源**：持倉與交易資料由 portfolio-service 管理。
+- **服務解耦**：radar-service 透過 positions_snapshot 介面取得持倉資訊，不依賴 trades 實作細節。
+- **策略抽換性**：Radar v1.4 策略引擎可抽換，但 positions_snapshot schema 為穩定契約。
+
 ## 策略抽換邊界
 
 - **Modules**：`Strategy Engine`（核心框架） + `Strategy Plugin`（可抽換邏輯）。

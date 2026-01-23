@@ -48,7 +48,7 @@
 | 服務 | 說明 | 預設內部埠口 |
 | --- | --- | --- |
 | Frontend | Vite + Vue 戰情室介面雛型，含 Vitest | 4173（對外 8080） |
-| api-gateway / web-bff | FastAPI，統一前端入口、Auth、聚合資料 | 8000 |
+| api-gateway | FastAPI，統一前端入口、Auth、聚合資料 | 8000 |
 | portfolio-service | FastAPI，交易/持倉/均價法/快照 | 8001 |
 | radar-service | FastAPI，Radar v1.4 策略引擎（可抽換） | 8002 |
 | news-service | FastAPI，新聞抓取/去重/中文摘要/重要性分數 | 8003 |

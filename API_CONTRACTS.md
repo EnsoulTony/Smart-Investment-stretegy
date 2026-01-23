@@ -2,7 +2,7 @@
 
 本文件列出主要微服務之輸入 / 輸出結構，確保前後端與外部整合遵循相同 schema。
 
-## 1. api-gateway / web-bff
+## 1. api-gateway
 
 ### `GET /health`
 ```json
@@ -40,28 +40,161 @@
 
 - 來源：Google Sheets → API or CSV
 
-### `trades` 表（寫入 Postgres）
+### API 端點（MVP）
+
+#### `POST /portfolio/sync`
+從 Google Sheets 同步交易流水帳到資料庫。
+
+**Request**
+```json
+{
+  "user_id": "user-uuid",
+  "sheet_url": "https://docs.google.com/spreadsheets/d/...",
+  "force_full_sync": false
+}
+```
+
+**Response 200 OK**
+```json
+{
+  "status": "success",
+  "run_id": "sync-run-uuid",
+  "inserted_count": 15,
+  "updated_count": 2,
+  "skipped_count": 3,
+  "synced_at": "2026-01-23T10:30:00Z"
+}
+```
+
+**Error 400 Bad Request**
+```json
+{
+  "error": "INVALID_SHEET_URL",
+  "message": "無法存取 Google Sheets，請檢查權限或連結"
+}
+```
+
+**Error 401 Unauthorized**
+```json
+{
+  "error": "UNAUTHORIZED",
+  "message": "缺少或無效的 JWT token"
+}
+```
+
+**Error 500 Internal Server Error**
+```json
+{
+  "error": "SYNC_FAILED",
+  "message": "同步過程發生錯誤，請稍後再試"
+}
+```
+
+#### `GET /portfolio/positions/latest`
+回傳最新持倉快照（均價法計算結果）。
+
+**Request**
+```
+GET /portfolio/positions/latest?user_id=user-uuid
+```
+
+**Response 200 OK**
+```json
+{
+  "user_id": "user-uuid",
+  "as_of": "2026-01-23T10:00:00Z",
+  "positions": [
+    {
+      "symbol": "QQQ",
+      "asset_ccy": "USD",
+      "quantity": 100,
+      "avg_cost": 388.5,
+      "realized_pnl": 0,
+      "unrealized_pnl": 1150.0,
+      "last_updated_at": "2026-01-23T10:00:00Z"
+    }
+  ]
+}
+```
+
+**Error 404 Not Found**
+```json
+{
+  "error": "NO_POSITIONS",
+  "message": "尚未同步任何持倉資料"
+}
+```
+
+#### `GET /portfolio/trades`
+查詢交易流水帳（支援篩選）。
+
+**Request**
+```
+GET /portfolio/trades?user_id=user-uuid&symbol=QQQ&since=2026-01-01
+```
+
+**Query Parameters**
+- `user_id` (required): 使用者 ID
+- `symbol` (optional): 股票代號篩選
+- `since` (optional): 起始日期（YYYY-MM-DD）
+
+**Response 200 OK**
+```json
+{
+  "user_id": "user-uuid",
+  "total_count": 5,
+  "trades": [
+    {
+      "id": "trade-uuid",
+      "symbol": "QQQ",
+      "trade_date": "2026-01-15",
+      "side": "buy",
+      "quantity": 50,
+      "price": 395.20,
+      "fees": 1.5,
+      "created_at": "2026-01-15T09:30:00Z"
+    }
+  ]
+}
+```
+
+**Error 400 Bad Request**
+```json
+{
+  "error": "INVALID_PARAMETER",
+  "message": "since 參數格式錯誤，請使用 YYYY-MM-DD"
+}
+```
+
+### 資料庫 Schema
+
+#### `trades` 表（寫入 Postgres）
 | 欄位 | 型別 | 說明 |
 | --- | --- | --- |
 | id | UUID | 主鍵 |
+| user_id | UUID | 使用者 ID |
 | symbol | TEXT | 股票代號 |
 | trade_date | DATE | 交易日期 |
 | side | TEXT | `buy` / `sell` |
 | quantity | NUMERIC | 交易數量 |
 | price | NUMERIC | 成交價格 |
 | fees | NUMERIC | 手續費 |
+| created_at | TIMESTAMP | 建立時間 |
 
-### `positions_snapshot`
+#### `positions_snapshot`
 | 欄位 | 型別 | 說明 |
 | --- | --- | --- |
-| id | UUID |
-| as_of | TIMESTAMP |
-| symbol | TEXT |
-| quantity | NUMERIC |
-| avg_cost | NUMERIC |
-| market_price | NUMERIC |
-| unrealized_pl | NUMERIC |
-| is_core | BOOLEAN |
+| id | UUID | 主鍵 |
+| user_id | UUID | 使用者 ID |
+| as_of | TIMESTAMP | 快照時間 |
+| symbol | TEXT | 股票代號 |
+| asset_ccy | TEXT | 資產幣別 |
+| quantity | NUMERIC | 持有數量 |
+| avg_cost | NUMERIC | 平均成本 |
+| realized_pnl | NUMERIC | 已實現損益 |
+| unrealized_pnl | NUMERIC | 未實現損益 |
+| is_core | BOOLEAN | 是否為核心持股 |
+| last_updated_at | TIMESTAMP | 最後更新時間 |
 
 ## 3. radar-service
 
