@@ -1,0 +1,38 @@
+version: '3.8'
+services:
+  postgres:
+    image: postgres:15
+    environment:
+      POSTGRES_USER: investment
+      POSTGRES_PASSWORD: investment
+      POSTGRES_DB: investment_db
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    security_opt:
+      - apparmor:unconfined
+
+  tests:
+    image: python:3.11-slim
+    depends_on:
+      - postgres
+    working_dir: /workspace
+    volumes:
+      - ./:/workspace:delegated
+    entrypoint: ["/bin/sh","-c"]
+    command: |
+      pip install --upgrade pip && \
+      (if [ -f requirements.txt ]; then pip install -r requirements.txt; fi) && \
+      pytest -q
+    environment:
+      DATABASE_URL: postgresql://investment:investment@postgres:5432/investment_db
+    security_opt:
+      - apparmor:unconfined
+
+volumes:
+  postgres_data:
+    driver: local
