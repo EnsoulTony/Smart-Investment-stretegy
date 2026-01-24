@@ -10,6 +10,7 @@ services:
     - postgres_data:/var/lib/postgresql/data
     ports:
     - 5432:5432
+    privileged: true
     security_opt:
     - apparmor:unconfined
     - seccomp:unconfined
@@ -25,6 +26,7 @@ services:
     - postgres
     ports:
     - 8000:8000
+    privileged: true
     security_opt:
     - apparmor:unconfined
     - seccomp:unconfined
@@ -43,6 +45,7 @@ services:
     - postgres
     ports:
     - 8001:8001
+    privileged: true
     security_opt:
     - apparmor:unconfined
     - seccomp:unconfined
@@ -58,6 +61,7 @@ services:
     - postgres
     ports:
     - 8002:8002
+    privileged: true
     security_opt:
     - apparmor:unconfined
     - seccomp:unconfined
@@ -73,6 +77,7 @@ services:
     - postgres
     ports:
     - 8003:8003
+    privileged: true
     security_opt:
     - apparmor:unconfined
     - seccomp:unconfined
@@ -88,6 +93,7 @@ services:
     - postgres
     ports:
     - 8004:8004
+    privileged: true
     security_opt:
     - apparmor:unconfined
     - seccomp:unconfined
@@ -101,6 +107,7 @@ services:
     - api-gateway
     ports:
     - 8080:4173
+    privileged: true
     security_opt:
     - apparmor:unconfined
     - seccomp:unconfined
