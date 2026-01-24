@@ -53,15 +53,49 @@
 
 ## 測試結果
 
-### 執行命令
+**執行時間**：2026-01-24 17:18 UTC  
+**執行環境**：GitHub Codespaces (Linux)  
+**容器**：docker compose run --rm portfolio-service
+
+### 全部測試
 ```bash
-docker compose run --rm portfolio-service pytest tests/ -k rebuild -v
+$ docker compose run --rm portfolio-service pytest -q
 ```
 
-### 結果
 ```
-16 passed, 62 deselected in 0.89s
+........................................................................ [ 92%]
+......                                                                   [100%]
+78 passed in 1.20s
 ```
+
+### Sprint 1-4.3 相關測試
+```bash
+$ docker compose run --rm portfolio-service pytest -q -k rebuild
+```
+
+```
+................                                                         [100%]
+16 passed in 0.45s
+```
+
+### FX 模組測試（架構邊界驗證）
+```bash
+# 測試 1：介面與 Stub
+$ docker compose run --rm portfolio-service pytest -q tests/test_fx.py
+..............                                                           [100%]
+14 passed in 0.03s
+
+# 測試 2：Guardrails
+$ docker compose run --rm portfolio-service pytest -q tests/test_fx_guardrails.py
+......                                                                   [100%]
+6 passed in 0.07s
+```
+
+**總計**：
+- ✅ 78 個測試全部通過
+- ✅ 16 個 rebuild 相關測試通過
+- ✅ 20 個 FX 模組測試通過（介面 + Stub + Guardrails）
+- ⚠️ **注意**：之前使用 `tests/test_fx/` 目錄路徑會誤報「no tests ran」
 
 **測試分佈**：
 - test_rebuild_positions_endpoint.py: 6 passed ✅
@@ -143,17 +177,91 @@ docker compose run --rm portfolio-service pytest tests/ -k rebuild -v
    - 新增 3 個測試：資料庫寫入、冪等性、無 trades
 
 ## 技術債務與未來工作
-⏸ **valuation_ccy 欄位**
-   - 目前 Position 模型無 `valuation_ccy` 欄位
-   - 使用者原始需求提到「固定 TWD」，但模型未包含此欄位
-   - 建議：未來 Sprint 如需支援多幣別報表，再新增此欄位
 
-⏸ **估值層（未來）**
-   - 當前 `unrealized_pnl` 固定為 0
-   - 未來 Sprint 將實作估值層（使用 FX 模組折算）
+⏸ **valuation_ccy 欄位** (**已驗證：當前不存在**)
+   - **證據**：執行 `docker compose exec postgres psql -U investment -d investment_db -c "\d positions"`  
+     結果僅有 9 個欄位：`id, user_id, symbol, asset_ccy, quantity, avg_cost, realized_pnl, unrealized_pnl, last_updated_at`
+   - **現狀**：Position 表只有 `asset_ccy`（標的資產幣別），無 `valuation_ccy`（報表幣別）
+   - **原因**：帳務層只負責累積交易，不涉及幣別轉換或估值
+   - **硬禁止規則**：
+     - ❌ Sprint 1-4.A/1-4.3 階段禁止新增 `valuation_ccy` / `market_value` / `valuation_date` 欄位
+     - ❌ 禁止在帳務層（`position_rebuilder.py`）呼叫 FX 模組
+     - ❌ 禁止 `unrealized_pnl` 填入非零值
+     - ✅ **唯一例外**：Sprint 1-4.B（估值層）可透過 Alembic migration 新增欄位
+   - **建議**：未來 Sprint 1-4.B（估值層）實作時，透過 Alembic migration 新增此欄位
+
+⏸ **估值層（未來 Sprint 1-4.B）**
+   - 當前 `unrealized_pnl` 固定為 0（帳務層不計算市價損益）
+   - 未來 Sprint 1-4.B 將實作估值層（呼叫 FX 模組折算）
 
 ⏸ **Guardrail Tests**
-   - 建議新增自動化檢查：掃描 imports，確保帳務層不呼叫 FX
+   - 建議新增自動化檢查：掃描 `from app.fx` imports，確保帳務層不呼叫 FX
+   - 參考命令：`grep -rn 'from app.fx' services/portfolio-service/app --include='*.py' --exclude-dir=fx`
+
+---
+
+## 🚫 硬禁止規則（Sprint 1-4.A/1-4.3 階段）
+
+### 1. 帳務層禁止呼叫 FX 模組
+
+**禁止清單**：
+```python
+# ❌ 以下任何一行出現在 position_rebuilder.py 或 avg_cost_calculator.py，視為違規
+from app.fx import get_fx_provider
+from app.fx import FxProvider
+fx_provider.get_rate(...)
+fx_provider.convert(...)
+```
+
+**檢查命令**：
+```bash
+grep -n "from app.fx\|import.*fx\|get_rate\|\.convert(" \
+  services/portfolio-service/app/position_rebuilder.py \
+  services/portfolio-service/app/avg_cost_calculator.py
+# 必須無任何輸出
+```
+
+**驗證結果**：✅ 無任何輸出（已驗證）
+
+---
+
+### 2. 禁止新增估值欄位（當前階段）
+
+**禁止新增的欄位**：
+- ❌ `valuation_ccy`（估值幣別）
+- ❌ `market_value`（市值）
+- ❌ `valuation_date`（估值日期）
+
+**檢查命令**：
+```bash
+docker compose exec postgres psql -U investment -d investment_db -c \
+  "SELECT column_name FROM information_schema.columns \
+   WHERE table_name='positions' \
+   AND column_name ~ '(valuation|market_value)';"
+# 必須回傳 (0 rows)
+```
+
+**驗證結果**：✅ (0 rows)（已驗證）
+
+---
+
+### 3. 估值欄位只能透過 Alembic Migration 新增
+
+**禁止方式**：
+- ❌ 直接執行 SQL ALTER TABLE
+- ❌ 在 `models.py` 新增欄位後直接重啟服務
+
+**正確方式**（僅限 Sprint 1-4.B）：
+```bash
+cd services/portfolio-service
+alembic revision -m "sprint_1_4_b_add_valuation_fields"
+# 編輯 migration 檔案
+alembic upgrade head
+```
+
+**Migration 必須包含**：
+- ✅ `# Sprint 1-4.B: Valuation Layer` 註解
+- ✅ rollback 機制（downgrade 函數）
 
 ## 驗收標準達成情況
 | 標準 | 狀態 | 證據 |

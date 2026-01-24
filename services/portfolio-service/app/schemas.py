@@ -146,3 +146,32 @@ class RebuildPositionsResponse(BaseModel):
     status: str = Field(..., description="執行狀態：succeeded 或 failed")
     symbols: List[str] = Field(default_factory=list, description="受影響的標的列表")
     affected_count: int = Field(..., ge=0, description="受影響的標的數量")
+
+
+class PositionSnapshot(BaseModel):
+    """持倉快照（帳務層專用，不含估值）。
+    
+    嚴格限制：
+    - 只包含帳務欄位（symbol, asset_ccy, quantity, avg_cost, realized_pnl, cost_basis）
+    - 不得包含估值欄位（market_value, unrealized_pnl, valuation_ccy, fx_rate）
+    - cost_basis = quantity * avg_cost（會計成本基礎）
+    """
+    symbol: str = Field(..., description="股票代碼")
+    asset_ccy: str = Field(..., description="資產幣別（原始交易幣別）")
+    quantity: Decimal = Field(..., description="持倉數量")
+    avg_cost: Decimal = Field(..., description="均價（會計成本）")
+    realized_pnl: Decimal = Field(..., description="已實現損益")
+    cost_basis: Decimal = Field(..., description="成本基礎（quantity * avg_cost）")
+    
+    model_config = ConfigDict(from_attributes=True)
+
+
+class PositionsResponse(BaseModel):
+    """持倉查詢回應。
+    
+    帳務層只讀 API，不做估值計算。
+    """
+    user_id: str
+    items: List[PositionSnapshot]
+    total_count: int
+    cursor: Optional[str] = None  # 分頁游標（未來實作）

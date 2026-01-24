@@ -509,6 +509,227 @@ Before coding:
  curl http://localhost:8000/health
 ```
 
+## Sprint 1-4 系列：FX 模組與估值層邊界（Architecture Guardrails）
+
+### Sprint 邊界總覽
+
+| Sprint | 目標 | 允許範圍 | 硬禁止項目 |
+|--------|------|---------|-----------|
+| **1-4.A** | FX 模組介面定義 | 介面 + Stub（同幣別可用、跨幣別必炸） | 真實 Provider、HTTP 請求、匯率 cache、估值計算 |
+| **1-4.3** | 帳務層重算 | positions 表寫入、均價計算、`unrealized_pnl=0` | 估值計算、匯率折算、呼叫 FX 模組、新增估值欄位 |
+| **1-4.B** | 估值層實作 | 匯率 Provider、cache、`valuation_ccy` 欄位、市值計算 | 估值邏輯散落到非 `valuation_service.py` |
+
+---
+
+### Sprint 1-4.A：FX 模組介面（已完成）
+
+**交付物**：
+- ✅ `app/fx/interfaces.py`：`FxProvider` 抽象基類
+- ✅ `app/fx/stub_provider.py`：Stub 實作（同幣別可用、跨幣別拋例外）
+- ✅ `app/fx/types.py`：`Currency`、`ExchangeRate` 型別定義
+- ✅ `app/fx/__init__.py`：`get_fx_provider()` factory 唯一入口
+- ✅ 20 個測試通過（14 個 Stub 測試 + 6 個 Guardrails 測試）
+
+**驗收命令**：
+```bash
+# 測試 1：FX 介面與 Stub
+docker compose exec -T portfolio-service pytest -q tests/test_fx.py
+# 期望：14 passed
+
+# 測試 2：所有 FX 相關測試（含 Guardrails）
+docker compose exec -T portfolio-service pytest -q -k fx
+# 期望：20 passed, 55 deselected
+```
+
+**可證偽證據**（測試收集）：
+```bash
+docker compose exec -T portfolio-service pytest -q -k fx --collect-only
+# 輸出：20/75 tests collected (55 deselected)
+# 來源：
+# - tests/test_fx.py: 14 tests (Stub/Factory/Integration)
+# - tests/test_fx_guardrails.py: 6 tests (架構邊界檢查)
+```
+
+**硬禁止項目**（Sprint 1-4.A 階段）：
+- ❌ 真實匯率 Provider（Yahoo Finance、央行牌告、Alpha Vantage）
+- ❌ HTTP 請求套件（requests、httpx）
+- ❌ 匯率 cache（Redis、DB rates 表）
+- ❌ 估值計算邏輯
+
+---
+
+### Sprint 1-4.3：帳務層重算（已完成）
+
+**交付物**：
+- ✅ `POST /portfolio/rebuild_positions`：從 trades 重算 positions
+- ✅ `avg_cost_calculator.py`：均價法計算器（純函數）
+- ✅ `position_rebuilder.py`：帳務重算邏輯（使用 merge 實現冪等性）
+- ✅ 16 個測試通過（資料庫寫入、冪等性、邊界測試）
+
+**驗收命令**：
+```bash
+# 測試：rebuild 相關測試
+docker compose exec -T portfolio-service pytest -q -k rebuild
+# 期望：16 passed
+
+# 檢查：帳務層不呼叫 FX 模組
+grep -rn "from app.fx" services/portfolio-service/app/position_rebuilder.py
+
+# 檢查：帳務層不做折算（最陰險的發散來源）
+grep -rn "fx\.convert\|fx\.get_rate" \
+  services/portfolio-service/app/position_rebuilder.py \
+  services/portfolio-service/app/domain/avg_cost_calculator.py \
+  services/portfolio-service/app/repositories/trades_repository.py
+# 期望：（空，無任何匹配）
+# 期望：（空，無任何匹配）
+```
+
+**硬禁止項目**（Sprint 1-4.3 階段）：
+- ❌ 呼叫 FX 模組（`from app.fx import ...`）
+- ❌ 匯率折算邏輯（`convert(amount, from_ccy, to_ccy)`）
+- ❌ 估值計算（`unrealized_pnl` 必須固定為 0）
+- ❌ 新增估值欄位（`valuation_ccy`、`market_value`、`valuation_date`）
+
+---
+
+### Sprint 1-4.B：估值層實作（未來）
+
+**目標**：實作真實匯率資料源與估值計算
+
+**允許項目**（僅限 Sprint 1-4.B）：
+- ✅ 真實匯率 Provider（Yahoo Finance、央行牌告、Alpha Vantage）
+- ✅ 匯率 cache 機制（Redis、DB rates 表）
+- ✅ 估值服務（`valuation_service.py`）
+- ✅ 透過 Alembic migration 新增 `valuation_ccy` / `market_value` 欄位
+- ✅ 市值計算邏輯（`quantity * market_price * fx_rate`）
+
+**硬禁止項目**（即使在 Sprint 1-4.B）：
+- ❌ 估值邏輯散落到非 `valuation_service.py` 的檔案
+- ❌ 直接在 `position_rebuilder.py` 呼叫 FX 模組（維持帳務層純淨）
+- ❌ 不經 Alembic migration 直接 ALTER TABLE（SQL injection 風險）
+
+**Migration 範例**（Sprint 1-4.B 實作時使用）：
+
+```python
+# alembic/versions/xxxx_sprint_1_4_b_add_valuation_fields.py
+"""
+Sprint 1-4.B: Add valuation fields to positions table
+
+Revision ID: xxxx
+Revises: yyyy
+Create Date: 2026-01-xx
+"""
+
+def upgrade() -> None:
+    # 新增 valuation_ccy 欄位（預設 TWD）
+    op.add_column('positions', 
+        sa.Column('valuation_ccy', sa.Text(), nullable=False, server_default='TWD'))
+    # 新增 market_value 欄位（預設 0）
+    op.add_column('positions', 
+        sa.Column('market_value', sa.Numeric(), nullable=False, server_default='0'))
+
+def downgrade() -> None:
+    # 可回退
+    op.drop_column('positions', 'market_value')
+    op.drop_column('positions', 'valuation_ccy')
+```
+
+---
+
+### FX 模組擴充檢查清單（Sprint 1-4.B 準備）
+
+**開始 Sprint 1-4.B 之前，必須確認**：
+
+```bash
+# 1. 確認 Sprint 1-4.3 完成且穩定
+docker compose exec -T portfolio-service pytest -q
+# 期望：78 passed（或當前總數）
+
+# 2. 確認帳務層不呼叫 FX
+grep -rn "from app.fx" services/portfolio-service/app   --include="*.py"   --exclude-dir=fx   --exclude-dir=__pycache__
+# 期望：（空）
+
+# 3. 確認 Position 表無估值欄位
+docker compose exec postgres psql -U investment -d investment_db -c   "SELECT column_name FROM information_schema.columns    WHERE table_name='positions'    AND column_name ~ '(valuation|market_value)';"
+# 期望：(0 rows)
+
+# 4. 確認 unrealized_pnl 預設值為 0
+docker compose exec postgres psql -U investment -d investment_db -c   "SELECT column_default FROM information_schema.columns    WHERE table_name='positions' AND column_name='unrealized_pnl';"
+# 期望：'0'::numeric
+```
+
+**Sprint 1-4.B 實作步驟**：
+
+1. **建立估值服務骨架**
+   ```bash
+   touch services/portfolio-service/app/valuation_service.py
+   touch services/portfolio-service/tests/test_valuation_service.py
+   ```
+
+2. **選擇匯率資料源（優先順序）**
+   - Option 1: Yahoo Finance（免費、即時、全球覆蓋）
+   - Option 2: 央行牌告（官方、可靠、僅台幣對主要貨幣）
+   - Option 3: Alpha Vantage（需 API key、有 rate limit）
+
+3. **實作匯率 Provider**
+   ```bash
+   touch services/portfolio-service/app/fx/yahoo_provider.py
+   touch services/portfolio-service/tests/test_yahoo_provider.py
+   ```
+
+4. **新增估值欄位（透過 Alembic migration）**
+   ```bash
+   cd services/portfolio-service
+   alembic revision -m "sprint_1_4_b_add_valuation_fields"
+   # 編輯 migration 檔案
+   alembic upgrade head
+   ```
+
+5. **實作估值計算邏輯**
+   - 讀取 positions 表
+   - 透過 `get_fx_provider()` 取得匯率
+   - 計算 `market_value = quantity * market_price * fx_rate`
+   - 更新 positions 表（使用 `valuation_ccy = 'TWD'`）
+
+6. **驗收測試**
+   ```bash
+   docker compose exec -T portfolio-service pytest -q tests/test_valuation_service.py
+   docker compose exec -T portfolio-service pytest -q tests/test_yahoo_provider.py
+   ```
+
+---
+
+### 架構圖解
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                    Portfolio Service                        │
+├─────────────────────────────────────────────────────────────┤
+│                                                             │
+│  ┌─────────────────┐          ┌────────────────────┐       │
+│  │ Accounting Layer│          │ Valuation Layer    │       │
+│  │ (Sprint 1-4.3)  │          │ (Sprint 1-4.B)     │       │
+│  ├─────────────────┤          ├────────────────────┤       │
+│  │ ❌ 禁止呼叫 FX  │          │ ✅ 可呼叫 FX       │       │
+│  │ - rebuild_*     │          │ - valuation_*      │       │
+│  │ ❌ 禁止折算邏輯 │          │ ✅ 可做估值折算     │       │
+│  │ - fx.convert()  │          │ - fx.get_rate()    │       │
+│  │ - fx.get_rate() │          │ - target_ccy 參數   │       │
+│  │ - avg_cost_*    │          │ - market_value_*   │       │
+│  └─────────────────┘          └────────┬───────────┘       │
+│                                        │                   │
+│                    ┌───────────────────▼──────────────┐    │
+│                    │   FX Module (Sprint 1-4.A)       │    │
+│                    ├──────────────────────────────────┤    │
+│                    │ get_fx_provider() ← 唯一入口     │    │
+│                    │ ├── StubFxProvider (當前)        │    │
+│                    │ └── YahooFxProvider (Sprint 1-4.B)│   │
+│                    └──────────────────────────────────┘    │
+└─────────────────────────────────────────────────────────────┘
+```
+
+---
+
 ## 注意事項
 
 - 所有程式碼與文件須維持繁體中文描述。

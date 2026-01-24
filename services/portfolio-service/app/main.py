@@ -2,10 +2,13 @@
 
 import os
 import logging
-from fastapi import FastAPI, Depends, HTTPException
+from typing import Optional
+from fastapi import FastAPI, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
+from .schemas import RebuildPositionsRequest, RebuildPositionsResponse, PositionsResponse, PositionSnapshot
 
 from app.db import get_db
+from app.models import Position
 from app.sync_service import SyncService
 from app.position_rebuilder import PositionRebuilder, preview_rebuild
 from app.schemas import RebuildPositionsRequest, RebuildPositionsResponse
@@ -198,3 +201,81 @@ def preview_rebuild_positions(
             status_code=500,
             detail=f"預覽重算失敗：{str(e)}"
         )
+
+
+@app.get("/portfolio/positions", tags=["portfolio"], response_model=PositionsResponse)
+def get_positions(
+    user_id: str = Query(..., min_length=1, description="使用者 ID"),
+    asof: Optional[str] = Query(None, description="查詢時點（ISO format，未來實作）"),
+    limit: int = Query(100, ge=1, le=1000, description="返回筆數上限"),
+    cursor: Optional[str] = Query(None, description="分頁游標（未來實作）"),
+    db: Session = Depends(get_db)
+) -> PositionsResponse:
+    """查詢使用者持倉快照（帳務層只讀 API）。
+    
+    架構鐵律：
+    - 只回傳帳務欄位（symbol, asset_ccy, quantity, avg_cost, realized_pnl, cost_basis）
+    - 不做估值計算（market_value, unrealized_pnl 等由 valuation-service 負責）
+    - 不做匯率折算（不呼叫 app/fx 模組）
+    
+    回應欄位：
+    - symbol: 股票代碼
+    - asset_ccy: 資產幣別（原始交易幣別）
+    - quantity: 持倉數量
+    - avg_cost: 均價（會計成本）
+    - realized_pnl: 已實現損益
+    - cost_basis: 成本基礎（quantity * avg_cost）
+    
+    Args:
+        user_id: 使用者 ID（必填）
+        asof: 查詢時點（未來實作時間旅行查詢）
+        limit: 返回筆數上限（預設 100，最大 1000）
+        cursor: 分頁游標（未來實作）
+        db: 資料庫 session
+        
+    Returns:
+        PositionsResponse: 持倉快照列表（帳務數據，不含估值）
+        
+    Example:
+        GET /portfolio/positions?user_id=tony&limit=10
+        
+        {
+          "user_id": "tony",
+          "items": [
+            {
+              "symbol": "AAPL",
+              "asset_ccy": "USD",
+              "quantity": "100.00",
+              "avg_cost": "150.50",
+              "realized_pnl": "0.00",
+              "cost_basis": "15050.00"
+            }
+          ],
+          "total_count": 1,
+          "cursor": null
+        }
+    """
+    # 查詢用戶的所有持倉（帳務層數據）
+    positions = db.query(Position).filter(
+        Position.user_id == user_id
+    ).limit(limit).all()
+    
+    # 轉換為 response schema（計算 cost_basis）
+    items = []
+    for pos in positions:
+        cost_basis = pos.quantity * pos.avg_cost
+        items.append(PositionSnapshot(
+            symbol=pos.symbol,
+            asset_ccy=pos.asset_ccy,
+            quantity=pos.quantity,
+            avg_cost=pos.avg_cost,
+            realized_pnl=pos.realized_pnl,
+            cost_basis=cost_basis
+        ))
+    
+    return PositionsResponse(
+        user_id=user_id,
+        items=items,
+        total_count=len(items),
+        cursor=None  # 未來實作分頁
+    )
