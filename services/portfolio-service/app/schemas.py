@@ -136,10 +136,13 @@ class RebuildPositionsRequest(BaseModel):
 
 
 class RebuildPositionsResponse(BaseModel):
-    """持倉重算回應資料模型。
+    """持倉重算回應（Sprint 1-4.3 更新）。
     
-    用於 POST /portfolio/rebuild_positions 端點回應。
+    回傳格式：
+    - status: "succeeded" 或 "failed"
+    - symbols: 受影響的標的列表 ["AAPL", "TSLA"]
+    - affected_count: 受影響的標的數量
     """
     status: str = Field(..., description="執行狀態：succeeded 或 failed")
-    rebuilt_symbols_count: int = Field(..., ge=0, description="重算的標的數量")
-    warnings: List[str] = Field(default_factory=list, description="警告訊息列表")
+    symbols: List[str] = Field(default_factory=list, description="受影響的標的列表")
+    affected_count: int = Field(..., ge=0, description="受影響的標的數量")

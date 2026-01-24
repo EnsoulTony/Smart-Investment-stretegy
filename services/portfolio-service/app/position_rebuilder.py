@@ -51,70 +51,94 @@ class PositionRebuilder:
         self.session = session
     
     def rebuild_positions(self, user_id: str) -> Dict:
-        """重算指定用戶的持倉狀態。
+        """重算指定用戶的持倉狀態並寫入 positions 表。
         
-        流程（完整版，當前階段僅實作骨架）：
-        1. 驗證 user_id（目前略過）
-        2. 從 trades 表讀取該用戶所有交易，按 trade_date 排序
-        3. 按 symbol 分組，依序計算每筆交易後的持倉狀態
-        4. 呼叫均價法計算器（下階段實作）：
-           - 計算持倉數量（quantity）
-           - 計算平均成本（avg_cost）
-           - 計算已實現損益（realized_pnl）
-        5. 呼叫外幣折算邏輯（下階段實作）：
-           - 將不同幣別（USD、TWD、HKD）的持倉折算為基準幣別
-           - 使用即時或快取的匯率
-        6. 寫入 positions_snapshot 表（下階段實作）
-        7. 回傳結果摘要
+        Sprint 1-4.3 實作：
+        1. 從 trades 表讀取該用戶所有交易，按 trade_date 排序
+        2. 按 (symbol, asset_ccy) 分組
+        3. 每組內使用均價法計算器計算：
+           - quantity: 持倉數量
+           - avg_cost: 平均成本
+           - realized_pnl: 已實現損益
+        4. 寫入 positions 表（使用 merge 實現冪等性）
+        5. unrealized_pnl 固定填 0（不做估值）
+        6. 不做 FX 匯率折算（帳務層硬禁止）
         
         Args:
             user_id: 使用者 ID（例如："tony"）
             
         Returns:
             dict: 重算結果
-                - status: 執行狀態（"succeeded" 或 "failed"）
-                - rebuilt_symbols_count: 重算的標的數量（當前固定為 0）
-                - warnings: 警告訊息列表（當前為空陣列）
+                - status: "succeeded" 或 "failed"
+                - symbols: 受影響的標的列表 ["AAPL", "TSLA"]
+                - affected_count: 受影響的標的數量
                 
         Raises:
             ValueError: 當 user_id 為空時
-            Exception: 資料庫操作失敗時（下階段實作）
+            Exception: 資料庫操作失敗時
         
         Notes:
-            - 當前階段（Sprint 1-4.0）僅回傳固定結構，不做實際計算
-            - 下階段（Sprint 1-4.1）將引入均價法純函數
+            - 使用 session.merge() 實現冪等性（重複執行結果一致）
+            - 不呼叫 FX 模組（帳務層規範）
+            - unrealized_pnl 填 0（不做估值）
         """
         if not user_id or not user_id.strip():
             raise ValueError("user_id 不可為空")
         
-        logger.info("開始重算持倉，user_id=%s", user_id)
+        logger.info("開始重算持倉並寫入 positions 表，user_id=%s", user_id)
         
-        # TODO (Sprint 1-4.1): 實作以下邏輯
-        # 1. 讀取交易記錄：
-        #    trades = self.session.query(Trade).filter_by(user_id=user_id).order_by(Trade.trade_date).all()
-        #
-        # 2. 按 symbol 分組並計算：
-        #    positions = {}
-        #    for trade in trades:
-        #        if trade.symbol not in positions:
-        #            positions[trade.symbol] = Position(symbol=trade.symbol, quantity=0, avg_cost=0)
-        #        # 呼叫均價法計算器
-        #        positions[trade.symbol] = calculate_avg_cost(positions[trade.symbol], trade)
-        #
-        # 3. 寫入 positions_snapshot 表：
-        #    for symbol, position in positions.items():
-        #        self.session.merge(PositionSnapshot(...))
-        #    self.session.commit()
-        
-        # 當前階段：回傳固定結構
-        result = {
-            "status": "succeeded",
-            "rebuilt_symbols_count": 0,  # 下階段改為實際計算的標的數量
-            "warnings": []  # 下階段可能包含：「標的 XYZ 匯率缺失，使用預設匯率」
-        }
-        
-        logger.info("持倉重算完成，user_id=%s, result=%s", user_id, result)
-        return result
+        try:
+            # 使用 preview_rebuild 計算結果（不寫 DB）
+            preview_result = preview_rebuild(user_id, self.session)
+            
+            if preview_result["status"] != "succeeded":
+                logger.error("預覽計算失敗，user_id=%s", user_id)
+                return preview_result
+            
+            symbols_data = preview_result.get("symbols", [])
+            
+            # 從 app.models 匯入 Position
+            from app.models import Position
+            
+            # 寫入 positions 表
+            affected_symbols = []
+            for pos_data in symbols_data:
+                position = Position(
+                    user_id=user_id,
+                    symbol=pos_data["symbol"],
+                    asset_ccy=pos_data["asset_ccy"],
+                    quantity=Decimal(str(pos_data["qty"])),
+                    avg_cost=Decimal(str(pos_data["avg_cost"])),
+                    realized_pnl=Decimal(str(pos_data["realized_pnl"])),
+                    unrealized_pnl=Decimal("0")  # Sprint 1-4.3: 不做估值，填 0
+                )
+                
+                # 使用 merge 實現冪等性（基於 user_id + symbol unique constraint）
+                self.session.merge(position)
+                affected_symbols.append(pos_data["symbol"])
+            
+            # 提交事務
+            self.session.commit()
+            logger.info("持倉寫入完成，user_id=%s, affected_count=%d", user_id, len(affected_symbols))
+            
+            result = {
+                "status": "succeeded",
+                "symbols": affected_symbols,
+                "affected_count": len(affected_symbols)
+            }
+            
+            logger.info("持倉重算完成，user_id=%s, result=%s", user_id, result)
+            return result
+            
+        except Exception as e:
+            logger.exception("持倉重算失敗，user_id=%s, error=%s", user_id, str(e))
+            self.session.rollback()
+            return {
+                "status": "failed",
+                "symbols": [],
+                "affected_count": 0,
+                "error": str(e)
+            }
 
 
 def rebuild_positions(user_id: str, db: Session) -> Dict:

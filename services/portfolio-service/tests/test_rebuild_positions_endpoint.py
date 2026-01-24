@@ -52,7 +52,7 @@ def test_rebuild_positions_response_structure(client):
     
     驗證：
     - status 欄位存在且為字串
-    - rebuilt_symbols_count 欄位存在且為整數
+    - affected_count 欄位存在且為整數
     - warnings 欄位存在且為陣列
     """
     response = client.post(
@@ -64,13 +64,13 @@ def test_rebuild_positions_response_structure(client):
     
     # 驗證必要欄位存在
     assert "status" in data, "回應缺少 status 欄位"
-    assert "rebuilt_symbols_count" in data, "回應缺少 rebuilt_symbols_count 欄位"
-    assert "warnings" in data, "回應缺少 warnings 欄位"
+    assert "affected_count" in data, "回應缺少 affected_count 欄位"
+    assert "symbols" in data, "回應缺少 symbols 欄位"
     
     # 驗證欄位型別
     assert isinstance(data["status"], str), "status 應為字串"
-    assert isinstance(data["rebuilt_symbols_count"], int), "rebuilt_symbols_count 應為整數"
-    assert isinstance(data["warnings"], list), "warnings 應為陣列"
+    assert isinstance(data["affected_count"], int), "affected_count 應為整數"
+    assert isinstance(data["symbols"], list), "symbols 應為陣列"
 
 
 def test_rebuild_positions_status_succeeded(client):
@@ -78,7 +78,7 @@ def test_rebuild_positions_status_succeeded(client):
     
     驗證：
     - status = "succeeded"
-    - rebuilt_symbols_count = 0（當前階段固定值）
+    - affected_count = 0（當前階段固定值）
     - warnings = []（當前階段無警告）
     """
     response = client.post(
@@ -89,8 +89,8 @@ def test_rebuild_positions_status_succeeded(client):
     data = response.json()
     
     assert data["status"] == "succeeded", f"預期 status=succeeded，實際：{data['status']}"
-    assert data["rebuilt_symbols_count"] == 0, "當前階段應回傳 0"
-    assert data["warnings"] == [], "當前階段應無警告訊息"
+    assert data["affected_count"] == 0, "當前階段應回傳 0"
+    assert data["symbols"] == [], "當前階段應無 symbols"
 
 
 def test_rebuild_positions_missing_user_id(client):
