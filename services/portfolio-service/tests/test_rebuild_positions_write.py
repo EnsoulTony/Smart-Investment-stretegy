@@ -76,8 +76,12 @@ def test_rebuild_positions_writes_to_database(client, db_session: Session):
     assert response.status_code == 200
     data = response.json()
     assert data["status"] == "succeeded"
-    assert data["affected_count"] == 1
-    assert "AAPL" in data["symbols"]
+    assert data["user_id"] == "test_user"
+    assert data["symbols_count"] == 1
+    assert data["upserted_count"] == 1
+    assert data["deleted_or_zeroed_count"] == 0
+    assert data["run_id"]
+    assert "positions_columns" in data["evidence"]
     
     # 驗證資料庫寫入
     position = db_session.query(Position).filter_by(
@@ -138,6 +142,113 @@ def test_rebuild_positions_idempotency(client, db_session: Session):
     assert count == 1, "應該只有一筆記錄（冪等性）"
 
 
+def test_rebuild_positions_buy_sell_realized_pnl(client, db_session: Session):
+    """測試買賣混合時 realized_pnl 與 qty 正確。"""
+    trades = [
+        Trade(
+            user_id="test_user3",
+            symbol="MSFT",
+            asset_ccy="USD",
+            side="BUY",
+            quantity=Decimal("10"),
+            price=Decimal("100"),
+            fee=Decimal("0"),
+            trade_date=datetime(2024, 1, 1),
+            broker="IB",
+            source_hash="hash_msft_1",
+            source_row_id=1
+        ),
+        Trade(
+            user_id="test_user3",
+            symbol="MSFT",
+            asset_ccy="USD",
+            side="BUY",
+            quantity=Decimal("10"),
+            price=Decimal("120"),
+            fee=Decimal("0"),
+            trade_date=datetime(2024, 1, 2),
+            broker="IB",
+            source_hash="hash_msft_2",
+            source_row_id=2
+        ),
+        Trade(
+            user_id="test_user3",
+            symbol="MSFT",
+            asset_ccy="USD",
+            side="SELL",
+            quantity=Decimal("5"),
+            price=Decimal("130"),
+            fee=Decimal("0"),
+            trade_date=datetime(2024, 1, 3),
+            broker="IB",
+            source_hash="hash_msft_3",
+            source_row_id=3
+        ),
+    ]
+    for t in trades:
+        db_session.add(t)
+    db_session.commit()
+
+    response = client.post("/portfolio/rebuild_positions", json={"user_id": "test_user3"})
+    assert response.status_code == 200
+
+    position = db_session.query(Position).filter_by(
+        user_id="test_user3",
+        symbol="MSFT"
+    ).first()
+
+    assert position is not None
+    assert position.quantity == Decimal("15")
+    assert position.avg_cost == Decimal("110")
+    assert position.realized_pnl == Decimal("100")
+
+
+def test_rebuild_positions_sell_to_zero_deletes(client, db_session: Session):
+    """測試賣到零後刪除持倉。"""
+    trades = [
+        Trade(
+            user_id="test_user4",
+            symbol="NFLX",
+            asset_ccy="USD",
+            side="BUY",
+            quantity=Decimal("10"),
+            price=Decimal("50"),
+            fee=Decimal("0"),
+            trade_date=datetime(2024, 1, 1),
+            broker="IB",
+            source_hash="hash_nflx_1",
+            source_row_id=1
+        ),
+        Trade(
+            user_id="test_user4",
+            symbol="NFLX",
+            asset_ccy="USD",
+            side="SELL",
+            quantity=Decimal("10"),
+            price=Decimal("60"),
+            fee=Decimal("0"),
+            trade_date=datetime(2024, 1, 2),
+            broker="IB",
+            source_hash="hash_nflx_2",
+            source_row_id=2
+        ),
+    ]
+    for t in trades:
+        db_session.add(t)
+    db_session.commit()
+
+    response = client.post("/portfolio/rebuild_positions", json={"user_id": "test_user4"})
+    assert response.status_code == 200
+    data = response.json()
+    assert data["deleted_or_zeroed_count"] == 1
+
+    position = db_session.query(Position).filter_by(
+        user_id="test_user4",
+        symbol="NFLX"
+    ).first()
+    assert position is None
+
+
 def test_rebuild_positions_no_trades(client, db_session: Session):
     """測試當用戶沒有交易記錄時的處理。"""
     response = client.post("/portfolio/rebuild_positions", json={"user_id": "user_no_trades"})
@@ -145,5 +256,6 @@ def test_rebuild_positions_no_trades(client, db_session: Session):
     assert response.status_code == 200
     data = response.json()
     assert data["status"] == "succeeded"
-    assert data["affected_count"] == 0
-    assert data["symbols"] == []
+    assert data["symbols_count"] == 0
+    assert data["upserted_count"] == 0
+    assert data["deleted_or_zeroed_count"] == 0

@@ -3,7 +3,8 @@
 import os
 import logging
 from typing import Optional
-from fastapi import FastAPI, Depends, HTTPException, Query
+from contextlib import asynccontextmanager
+from fastapi import FastAPI, Depends, HTTPException, Query, Body
 from sqlalchemy.orm import Session
 from sqlalchemy import inspect
 from .schemas import RebuildPositionsRequest, RebuildPositionsResponse, PositionsResponse
@@ -15,13 +16,11 @@ from app.schemas import RebuildPositionsRequest, RebuildPositionsResponse
 from app.repositories.positions_repository import list_positions_for_user
 
 SERVICE_NAME = os.getenv("SERVICE_NAME", "portfolio-service")
-app = FastAPI(title="Portfolio Service", version="0.1.0")
 
 # 設定 logger
 logger = logging.getLogger(__name__)
 
 
-@app.on_event("startup")
 def verify_db_schema() -> None:
     """啟動時檢查 DB schema 與關鍵欄位是否存在。"""
     try:
@@ -47,6 +46,15 @@ def verify_db_schema() -> None:
             logger.error("DB schema mismatch: positions missing columns: %s", ", ".join(missing))
     except Exception as exc:
         logger.error("DB schema check failed: %s", exc)
+
+
+@asynccontextmanager
+async def lifespan(_: FastAPI):
+    verify_db_schema()
+    yield
+
+
+app = FastAPI(title="Portfolio Service", version="0.1.0", lifespan=lifespan)
 
 
 @app.get("/health", tags=["health"])
@@ -106,7 +114,8 @@ def sync_trades(db: Session = Depends(get_db)) -> dict:
 
 @app.post("/portfolio/rebuild_positions", tags=["portfolio"], response_model=RebuildPositionsResponse)
 def rebuild_positions(
-    request: RebuildPositionsRequest,
+    request: dict | None = Body(None),
+    user_id: Optional[str] = Query(None),
     db: Session = Depends(get_db)
 ) -> dict:
     """重算指定用戶的持倉狀態。
@@ -139,21 +148,29 @@ def rebuild_positions(
         - 下階段（Sprint 1-4.1）將實作均價法計算邏輯
     """
     try:
+        if user_id is None:
+            if request is None or "user_id" not in request:
+                raise HTTPException(status_code=422, detail="user_id is required")
+            user_id = request.get("user_id")
+        elif request is not None and request.get("user_id") not in (None, user_id):
+            raise HTTPException(status_code=422, detail="user_id mismatch")
+
+        if not user_id or not user_id.strip():
+            raise HTTPException(status_code=422, detail="user_id must not be empty")
+
         rebuilder = PositionRebuilder(session=db)
-        result = rebuilder.rebuild_positions(user_id=request.user_id)
+        result = rebuilder.rebuild_positions(user_id=user_id)
         return result
         
+    except HTTPException:
+        raise
     except ValueError as e:
         # 驗證錯誤（例如：user_id 為空）
-        logger.warning("重算持倉驗證失敗，user_id=%s, error=%s", request.user_id, e)
-        raise HTTPException(
-            status_code=500,
-            detail=str(e)
-        )
-        
+        logger.warning("重算持倉驗證失敗，user_id=%s, error=%s", user_id, e)
+        raise HTTPException(status_code=422, detail=str(e))
     except Exception as e:
         # 其他錯誤（DB 連線失敗、計算錯誤等）
-        logger.exception("重算持倉失敗，user_id=%s", request.user_id)
+        logger.exception("重算持倉失敗，user_id=%s", user_id)
         raise HTTPException(
             status_code=500,
             detail=f"重算持倉失敗：{str(e)}"

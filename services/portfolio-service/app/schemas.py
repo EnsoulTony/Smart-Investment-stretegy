@@ -136,16 +136,14 @@ class RebuildPositionsRequest(BaseModel):
 
 
 class RebuildPositionsResponse(BaseModel):
-    """持倉重算回應（Sprint 1-4.3 更新）。
-    
-    回傳格式：
-    - status: "succeeded" 或 "failed"
-    - symbols: 受影響的標的列表 ["AAPL", "TSLA"]
-    - affected_count: 受影響的標的數量
-    """
+    """持倉重算回應（Sprint 1-4.3）。"""
     status: str = Field(..., description="執行狀態：succeeded 或 failed")
-    symbols: List[str] = Field(default_factory=list, description="受影響的標的列表")
-    affected_count: int = Field(..., ge=0, description="受影響的標的數量")
+    user_id: str = Field(..., description="使用者 ID")
+    symbols_count: int = Field(..., ge=0, description="受影響的標的數量")
+    upserted_count: int = Field(..., ge=0, description="寫入/更新的筆數")
+    deleted_or_zeroed_count: int = Field(..., ge=0, description="刪除或歸零的筆數")
+    run_id: str = Field(..., description="本次執行識別碼")
+    evidence: dict = Field(..., description="可證偽的結構化證據")
 
 
 class PositionItem(BaseModel):

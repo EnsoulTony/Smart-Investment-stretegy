@@ -21,6 +21,8 @@ from sqlalchemy.orm import Session
 from typing import Dict, List
 from decimal import Decimal
 from collections import defaultdict
+from datetime import datetime, timezone
+from uuid import uuid4
 
 from app.schemas import TradeRecord
 from app.avg_cost_calculator import compute_avg_cost
@@ -68,10 +70,7 @@ class PositionRebuilder:
             user_id: 使用者 ID（例如："tony"）
             
         Returns:
-            dict: 重算結果
-                - status: "succeeded" 或 "failed"
-                - symbols: 受影響的標的列表 ["AAPL", "TSLA"]
-                - affected_count: 受影響的標的數量
+            dict: 重算結果摘要（含可證偽證據）
                 
         Raises:
             ValueError: 當 user_id 為空時
@@ -88,56 +87,85 @@ class PositionRebuilder:
         logger.info("開始重算持倉並寫入 positions 表，user_id=%s", user_id)
         
         try:
-            # 使用 preview_rebuild 計算結果（不寫 DB）
-            preview_result = preview_rebuild(user_id, self.session)
-            
-            if preview_result["status"] != "succeeded":
-                logger.error("預覽計算失敗，user_id=%s", user_id)
-                return preview_result
-            
-            symbols_data = preview_result.get("symbols", [])
-            
-            # 從 app.models 匯入 Position
+            trades_orm = list_trades_for_user(self.session, user_id)
+            grouped_trades = defaultdict(list)
+
+            for trade_orm in trades_orm:
+                trade_record = TradeRecord(
+                    user_id=trade_orm.user_id,
+                    symbol=trade_orm.symbol,
+                    asset_ccy=trade_orm.asset_ccy,
+                    side=trade_orm.side,
+                    quantity=trade_orm.quantity,
+                    price=trade_orm.price,
+                    fee=trade_orm.fee,
+                    trade_date=trade_orm.trade_date,
+                    broker=trade_orm.broker
+                )
+                grouped_trades[(trade_record.symbol, trade_record.asset_ccy)].append(trade_record)
+
             from app.models import Position
-            
-            # 寫入 positions 表
-            affected_symbols = []
-            for pos_data in symbols_data:
+
+            upserted_count = 0
+            deleted_or_zeroed_count = 0
+
+            for (symbol, asset_ccy), trades in grouped_trades.items():
+                state = compute_avg_cost(trades)
+                if state.qty == 0:
+                    deleted_or_zeroed_count += 1
+                    self.session.query(Position).filter(
+                        Position.user_id == user_id,
+                        Position.symbol == symbol
+                    ).delete(synchronize_session=False)
+                    continue
+
                 position = Position(
                     user_id=user_id,
-                    symbol=pos_data["symbol"],
-                    asset_ccy=pos_data["asset_ccy"],
-                    quantity=Decimal(str(pos_data["qty"])),
-                    avg_cost=Decimal(str(pos_data["avg_cost"])),
-                    realized_pnl=Decimal(str(pos_data["realized_pnl"])),
-                    u_pnl=Decimal("0")  # Sprint 1-4.3: 不做估值，填 0
+                    symbol=symbol,
+                    asset_ccy=asset_ccy,
+                    quantity=state.qty,
+                    avg_cost=state.avg_cost,
+                    realized_pnl=state.realized_pnl,
+                    u_pnl=Decimal("0"),
+                    last_updated_at=datetime.now(timezone.utc)
                 )
-                
-                # 使用 merge 實現冪等性（基於 user_id + symbol unique constraint）
+
                 self.session.merge(position)
-                affected_symbols.append(pos_data["symbol"])
-            
-            # 提交事務
+                upserted_count += 1
+
             self.session.commit()
-            logger.info("持倉寫入完成，user_id=%s, affected_count=%d", user_id, len(affected_symbols))
-            
+
+            run_id = str(uuid4())
+            evidence = {
+                "positions_columns": list(Position.__table__.columns.keys())
+            }
+
             result = {
                 "status": "succeeded",
-                "symbols": affected_symbols,
-                "affected_count": len(affected_symbols)
+                "user_id": user_id,
+                "symbols_count": len(grouped_trades),
+                "upserted_count": upserted_count,
+                "deleted_or_zeroed_count": deleted_or_zeroed_count,
+                "run_id": run_id,
+                "evidence": evidence,
             }
-            
+
             logger.info("持倉重算完成，user_id=%s, result=%s", user_id, result)
             return result
-            
+
         except Exception as e:
             logger.exception("持倉重算失敗，user_id=%s, error=%s", user_id, str(e))
             self.session.rollback()
             return {
                 "status": "failed",
-                "symbols": [],
-                "affected_count": 0,
-                "error": str(e)
+                "user_id": user_id,
+                "symbols_count": 0,
+                "upserted_count": 0,
+                "deleted_or_zeroed_count": 0,
+                "run_id": str(uuid4()),
+                "evidence": {
+                    "positions_columns": []
+                }
             }
 
 

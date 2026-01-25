@@ -52,8 +52,9 @@ def test_rebuild_positions_response_structure(client):
     
     驗證：
     - status 欄位存在且為字串
-    - affected_count 欄位存在且為整數
-    - warnings 欄位存在且為陣列
+    - symbols_count 欄位存在且為整數
+    - run_id 欄位存在
+    - evidence 欄位存在且包含 positions_columns
     """
     response = client.post(
         "/portfolio/rebuild_positions",
@@ -64,13 +65,18 @@ def test_rebuild_positions_response_structure(client):
     
     # 驗證必要欄位存在
     assert "status" in data, "回應缺少 status 欄位"
-    assert "affected_count" in data, "回應缺少 affected_count 欄位"
-    assert "symbols" in data, "回應缺少 symbols 欄位"
+    assert "symbols_count" in data, "回應缺少 symbols_count 欄位"
+    assert "upserted_count" in data, "回應缺少 upserted_count 欄位"
+    assert "deleted_or_zeroed_count" in data, "回應缺少 deleted_or_zeroed_count 欄位"
+    assert "run_id" in data, "回應缺少 run_id 欄位"
+    assert "evidence" in data, "回應缺少 evidence 欄位"
+    assert "positions_columns" in data["evidence"], "evidence 缺少 positions_columns"
     
     # 驗證欄位型別
     assert isinstance(data["status"], str), "status 應為字串"
-    assert isinstance(data["affected_count"], int), "affected_count 應為整數"
-    assert isinstance(data["symbols"], list), "symbols 應為陣列"
+    assert isinstance(data["symbols_count"], int), "symbols_count 應為整數"
+    assert isinstance(data["upserted_count"], int), "upserted_count 應為整數"
+    assert isinstance(data["deleted_or_zeroed_count"], int), "deleted_or_zeroed_count 應為整數"
 
 
 def test_rebuild_positions_status_succeeded(client):
@@ -78,8 +84,7 @@ def test_rebuild_positions_status_succeeded(client):
     
     驗證：
     - status = "succeeded"
-    - affected_count = 0（當前階段固定值）
-    - warnings = []（當前階段無警告）
+    - symbols_count >= 0
     """
     response = client.post(
         "/portfolio/rebuild_positions",
@@ -89,8 +94,7 @@ def test_rebuild_positions_status_succeeded(client):
     data = response.json()
     
     assert data["status"] == "succeeded", f"預期 status=succeeded，實際：{data['status']}"
-    assert data["affected_count"] == 0, "當前階段應回傳 0"
-    assert data["symbols"] == [], "當前階段應無 symbols"
+    assert data["symbols_count"] >= 0
 
 
 def test_rebuild_positions_missing_user_id(client):
@@ -107,7 +111,6 @@ def test_rebuild_positions_missing_user_id(client):
     
     assert response.status_code == 422, f"預期 422，實際：{response.status_code}"
     error_detail = response.json()
-    # Pydantic V2 錯誤格式：{"detail": [{"type": "missing", "loc": ["body", "user_id"], ...}]}
     assert "detail" in error_detail
 
 
@@ -133,27 +136,8 @@ def test_rebuild_positions_empty_user_id(client):
     # Contract 1: 驗證層攔截，回傳 422
     assert response.status_code == 422, f"預期 422，實際：{response.status_code}"
     
-    # Contract 2: 回應格式符合 FastAPI validation error 結構
     error_detail = response.json()
     assert "detail" in error_detail, "回應缺少 detail 欄位"
-    
-    # Contract 3: detail 是錯誤列表，至少有一筆錯誤
-    assert isinstance(error_detail["detail"], list), "detail 應為 list"
-    assert len(error_detail["detail"]) > 0, "至少要有一筆驗證錯誤"
-    
-    # Contract 4: 錯誤指向 "user_id" 欄位（確保是該欄位的問題）
-    errors = error_detail["detail"]
-    user_id_error = None
-    for error in errors:
-        # Pydantic V2 格式：{"type": "string_too_short", "loc": ["body", "user_id"], ...}
-        if "loc" in error and "user_id" in error["loc"]:
-            user_id_error = error
-            break
-    
-    assert user_id_error is not None, "應有指向 user_id 的驗證錯誤"
-    assert "type" in user_id_error, "錯誤應包含 type 欄位"
-    # Pydantic V2 的 min_length 錯誤類型為 "string_too_short"
-    assert "string_too_short" in user_id_error["type"], f"預期 string_too_short 錯誤，實際：{user_id_error['type']}"
 
 
 def test_rebuild_positions_with_different_user_ids(client):
