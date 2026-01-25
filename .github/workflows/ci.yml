@@ -59,6 +59,8 @@ jobs:
   portfolio-service-tests:
     name: Backend - Portfolio Service (Docker)
     runs-on: ubuntu-latest
+    env:
+      GOOGLE_SA_JSON_BASE64: ${{ secrets.GOOGLE_SA_JSON_BASE64 }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -72,9 +74,9 @@ jobs:
           EOF
 
       - name: Prepare optional Google SA secrets override
-        if: ${{ secrets.GOOGLE_SA_JSON_BASE64 != '' }}
+        if: ${{ env.GOOGLE_SA_JSON_BASE64 != '' }}
         run: |
-          echo "${{ secrets.GOOGLE_SA_JSON_BASE64 }}" | base64 -d > /tmp/google_sa.json
+          echo "${GOOGLE_SA_JSON_BASE64}" | base64 -d > /tmp/google_sa.json
           cat > docker-compose.secrets.yml << EOF
           services:
             portfolio-service:
@@ -91,16 +93,16 @@ jobs:
           else
             docker compose up -d --build postgres portfolio-service
           fi
-          
+
           # 等待 Postgres 就绪
           docker compose exec -T postgres sh -c 'until pg_isready -U investment; do sleep 1; done'
-          
+
           # 执行 Alembic migration（创建表结构）
           docker compose exec -T portfolio-service alembic upgrade head
-          
+
           # 运行测试
           docker compose exec -T portfolio-service pytest -q
-        
+
       - name: Cleanup
         if: always()
         run: |
