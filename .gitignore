@@ -32,6 +32,8 @@ venv.bak/
 
 # Environment variables
 .env
+.env.*
+docker-compose.secrets.yml
 .env.local
 
 # IDE

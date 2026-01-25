@@ -35,7 +35,6 @@ services:
       context: .
       dockerfile: services/portfolio-service/Dockerfile
     environment:
-      GOOGLE_SA_JSON_PATH: /run/secrets/google_sa.json
       PORT: 8001
       SERVICE_NAME: portfolio-service
       DATABASE_URL: ${DATABASE_URL:-postgresql://investment:investment@postgres:5432/investment_db}
@@ -54,8 +53,6 @@ services:
     - postgres
     ports:
     - 8001:8001
-    volumes:
-    - ${GOOGLE_SA_JSON_PATH}:/run/secrets/google_sa.json:ro
     privileged: true
     security_opt:
     - apparmor:unconfined

@@ -67,14 +67,30 @@ jobs:
         run: |
           cat > .env << EOF
           DATABASE_URL=postgresql://investment:investment@postgres:5432/investment_db
-          GOOGLE_SA_JSON={"type":"service_account","project_id":"test"}
           GOOGLE_SHEET_ID=test-sheet-id
-          GOOGLE_SHEET_NAME=test-sheet
+          GOOGLE_SHEET_TRADES_TAB=trades
+          EOF
+
+      - name: Prepare optional Google SA secrets override
+        if: ${{ secrets.GOOGLE_SA_JSON_BASE64 != '' }}
+        run: |
+          echo "${{ secrets.GOOGLE_SA_JSON_BASE64 }}" | base64 -d > /tmp/google_sa.json
+          cat > docker-compose.secrets.yml << EOF
+          services:
+            portfolio-service:
+              environment:
+                GOOGLE_SA_JSON_PATH: /run/secrets/google_sa.json
+              volumes:
+                - /tmp/google_sa.json:/run/secrets/google_sa.json:ro
           EOF
 
       - name: Build and run tests in Docker
         run: |
-          docker compose up -d --build postgres portfolio-service
+          if [ -f docker-compose.secrets.yml ]; then
+            docker compose -f docker-compose.yml -f docker-compose.secrets.yml up -d --build postgres portfolio-service
+          else
+            docker compose up -d --build postgres portfolio-service
+          fi
           
           # 等待 Postgres 就绪
           docker compose exec -T postgres sh -c 'until pg_isready -U investment; do sleep 1; done'
@@ -87,4 +103,6 @@ jobs:
         
       - name: Cleanup
         if: always()
-        run: docker compose down -v
+        run: |
+          docker compose down -v
+          rm -f /tmp/google_sa.json docker-compose.secrets.yml

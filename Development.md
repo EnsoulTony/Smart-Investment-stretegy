@@ -53,6 +53,11 @@ chmod +x tools/pr_check.sh
 **為何能避免 VM 才爆**：
 - `docker compose config` 是展開後「真相來源」，可在本機/CI 提前發現 env 注入錯誤。
 
+**CI / 本機 secrets 覆蓋檔策略**：
+- 主檔 [docker-compose.yml](docker-compose.yml) 不引用任何 secrets 來源，避免 CI 缺 env 直接爆。
+- 需要 Service Account 時使用覆蓋檔：`-f docker-compose.secrets.yml`。
+- 覆蓋檔僅存本機或 CI runtime 生成，不提交到 repo。
+
 ### 1) Forbidden tokens 靜態掃描（rg）
 ```bash
 # valuation-service 禁止 DB 直連 tokens
