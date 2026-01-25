@@ -5,9 +5,10 @@ import logging
 from typing import Optional
 from fastapi import FastAPI, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
+from sqlalchemy import inspect
 from .schemas import RebuildPositionsRequest, RebuildPositionsResponse, PositionsResponse
 
-from app.db import get_db
+from app.db import get_db, engine
 from app.sync_service import SyncService
 from app.position_rebuilder import PositionRebuilder, preview_rebuild
 from app.schemas import RebuildPositionsRequest, RebuildPositionsResponse
@@ -18,6 +19,34 @@ app = FastAPI(title="Portfolio Service", version="0.1.0")
 
 # 設定 logger
 logger = logging.getLogger(__name__)
+
+
+@app.on_event("startup")
+def verify_db_schema() -> None:
+    """啟動時檢查 DB schema 與關鍵欄位是否存在。"""
+    try:
+        inspector = inspect(engine)
+        if not inspector.has_table("positions"):
+            logger.error("DB schema mismatch: positions table missing")
+            return
+
+        columns = {col["name"] for col in inspector.get_columns("positions")}
+        required = {
+            "user_id",
+            "symbol",
+            "asset_ccy",
+            "quantity",
+            "avg_cost",
+            "realized_pnl",
+            "u_pnl",
+            "last_updated_at",
+        }
+
+        missing = sorted(required - columns)
+        if missing:
+            logger.error("DB schema mismatch: positions missing columns: %s", ", ".join(missing))
+    except Exception as exc:
+        logger.error("DB schema check failed: %s", exc)
 
 
 @app.get("/health", tags=["health"])
