@@ -27,7 +27,7 @@ Smart-Investment-Strategy 採微服務架構，分為前端、API Gateway、四�
   - JWT 驗證（簡易登入）（TODO）。
   - 聚合 portfolio/radar/news/research 的資料，對前端提供單一 API（TODO）。
 - **portfolio-service**：
-  - 管理 `trades`、`positions_snapshot`、均價法計算。
+  - 管理 `trades`、`positions`、均價法計算。
   - 與 Google Sheets 同步資料。
 - **radar-service**：
   - 執行 Strategy Engine（Radar v1.4）。
@@ -41,7 +41,7 @@ Smart-Investment-Strategy 採微服務架構，分為前端、API Gateway、四�
 
 ## 資料流程
 
-1. `portfolio-service` 啟動時同步 Google Sheets → 寫入 `trades`、`positions_snapshot`。
+1. `portfolio-service` 啟動時同步 Google Sheets → 寫入 `trades`、`positions`。
 2. `radar-service` 讀取 `indicator_values`（含 `RS_XLU_XLK`）+ 持倉資料 → 產出建議。
 3. `news-service` / `research-service` 週期性擷取資料，寫入 `news_signals` / `research_signals`。
 4. `api-gateway` 聚合上述資料 → 提供前端 UI。

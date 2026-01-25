@@ -11,7 +11,7 @@
 - ✅ 持倉/交易同步：啟動時讀取 Google Sheets（持倉表單 + 流水帳交易紀錄）
 - ✅ 資料落庫（Postgres）：
 	- 交易紀錄 `trades`
-	- 持倉快照 `positions_snapshot`
+	- 持倉快照 `positions`
 	- 指標值 `indicator_values`（例如 `RS_XLU_XLK`）
 	- 新聞訊號 `news_signals`
 	- 研究訊號 `research_signals`

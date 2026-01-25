@@ -489,7 +489,7 @@ grep -rn "from app.fx\|get_rate\|convert("   services/portfolio-service/app/posi
 | Sprint | 允許範圍 | 禁止項目 |
 |--------|---------|---------|
 | **1-4.A** | 介面定義 + Stub（同幣別可用、跨幣別必炸） | 真實 Provider、HTTP 請求、匯率 cache |
-| **1-4.3** | 帳務重算（positions 表寫入，`unrealized_pnl=0`） | 估值計算、匯率折算、FX 模組呼叫 |
+| **1-4.3** | 帳務重算（positions 表寫入，`u_pnl=0`） | 估值計算、匯率折算、FX 模組呼叫 |
 | **1-4.B** | 估值層實作（匯率來源、cache、valuation 欄位） | 估值邏輯散落到非 valuation_service.py |
 
 ---
@@ -935,8 +935,8 @@ docker compose exec -T valuation-service pytest -q tests/test_guardrails_no_db.p
 docker compose exec postgres psql -U investment -d investment_db -c   "SELECT column_name FROM information_schema.columns    WHERE table_name='positions'    AND column_name ~ '(valuation|market_value)';"
 # 期望輸出：(0 rows)
 
-# 確認 unrealized_pnl 預設值為 0
-docker compose exec postgres psql -U investment -d investment_db -c   "SELECT column_default FROM information_schema.columns    WHERE table_name='positions' AND column_name='unrealized_pnl';"
+# 確認 u_pnl 欄位存在（帳務層固定填 0）
+docker compose exec postgres psql -U investment -d investment_db -c   "SELECT column_name FROM information_schema.columns    WHERE table_name='positions' AND column_name='u_pnl';"
 # 期望輸出：'0'::numeric
 ```
 
@@ -1290,7 +1290,7 @@ docs: add RUNBOOK for Claude Code CLI installation and verification
 
 **portfolio-service（帳務層）**：
 - ❌ **禁止匯率折算**：不得呼叫 `fx.get_rate()` 或 `fx.convert()`
-- ❌ **禁止估值計算**：不得計算 `market_value`、`market_price`、`unrealized_pnl`（除填 0）
+- ❌ **禁止估值計算**：不得計算 `market_value`、`market_price`、`u_pnl`（除填 0）
 - ❌ **禁止 target_ccy 參數**：帳務 API 不接受目標幣別參數
 - ✅ **只做帳務**：`avg_cost`、`realized_pnl`、`quantity`、原始 `asset_ccy`
 

@@ -88,15 +88,15 @@ curl -s http://localhost:8001/openapi.json | \
 **禁止項目**：
 - ❌ 匯率折算邏輯（`convert(amount, from_ccy, to_ccy)`）
 - ❌ 市價計算邏輯（`quantity * market_price`）
-- ❌ `unrealized_pnl` 填入非零值
+- ❌ `u_pnl` 填入非零值
 - ❌ 新增 `valuation_ccy` / `market_value` / `valuation_date` 欄位
 
 **檢查命令**：
 ```bash
-# 確認 unrealized_pnl 預設值為 0
+# 確認 u_pnl 預設值為 0
 docker compose exec postgres psql -U investment -d investment_db -c \
   "SELECT column_default FROM information_schema.columns \
-   WHERE table_name='positions' AND column_name='unrealized_pnl';"
+  WHERE table_name='positions' AND column_name='u_pnl';"
 # 必須回傳 '0'::numeric
 
 # 驗證結果
@@ -132,7 +132,7 @@ positions 表欄位（9 個）：
 - quantity
 - avg_cost
 - realized_pnl
-- unrealized_pnl     ← 預設值 0（不做估值）
+- u_pnl     ← 預設值 0（不做估值）
 - last_updated_at
 
 ❌ 不存在 valuation_ccy
@@ -228,3 +228,32 @@ docker compose run --rm portfolio-service pytest -q
 **報告日期**：2026-01-24  
 **驗證環境**：GitHub Codespaces (Linux)  
 **最後驗證時間**：2026-01-24 17:23 UTC
+
+---
+
+## 🧾 Phase 2 一致性稽核報告（2026-01-25）
+
+### 範圍與原則
+- **真相來源**：以實際 DB 與已上線 API 為準（`positions` 表 + `u_pnl` 欄位）。
+- **變更限制**：僅更新文件與註解，不修改測試或程式邏輯。
+
+### 稽核結論
+- ✅ 文件內容已對齊實際 Schema：`positions` + `u_pnl`。
+- ✅ API 契約對齊：`/portfolio/positions` 與 `/portfolio/trades/summary`。
+- ✅ 已移除舊稱：`positions_snapshot`、`/portfolio/positions/latest`、`unrealized_pnl`。
+
+### 修正項目（文件）
+- Sprint/驗收/驗證報告中 `unrealized_pnl` 全面改為 `u_pnl`。
+- 將 `positions_snapshot` 改為 `positions`。
+- trades 端點範例改為 `/portfolio/trades/summary`。
+
+### 變更證據（文件）
+- [SPRINT_1-4-3_ACCEPTANCE_REPORT.md](SPRINT_1-4-3_ACCEPTANCE_REPORT.md)
+- [SPRINT_1-4_STATUS.md](SPRINT_1-4_STATUS.md)
+- [VERIFICATION_REPORT_2026-01-24.md](VERIFICATION_REPORT_2026-01-24.md)
+- [SHORT_SELLING_BUG_DIAGNOSIS.md](SHORT_SELLING_BUG_DIAGNOSIS.md)
+
+### 測試結果
+- 使用者提供：`99 passed, 1 skipped`。
+
+**報告日期**：2026-01-25

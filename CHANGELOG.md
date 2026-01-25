@@ -65,12 +65,12 @@
 ## [0.2.0] - 2026-01-23（Sprint 1-0：文件與契約先行）
 - 新增 portfolio-service 完整 API 契約（API_CONTRACTS.md）
   - POST /portfolio/sync：Google Sheets 同步交易流水帳
-  - GET /portfolio/positions/latest：最新持倉快照（均價法）
-  - GET /portfolio/trades：交易流水帳查詢（支援篩選）
+  - GET /portfolio/positions：最新持倉快照（均價法）
+  - GET /portfolio/trades/summary：交易摘要（輕量探針）
 - 新增 Development.md 的 Sprint 1 分段 prompts（Sprint 1-1 至 1-5）
   - 包含驗收方式、測試指令與預期檔案清單
 - 補充 Strategy.md 的 Portfolio Service 與 Radar Service 邊界描述
-  - 明確定義 positions_snapshot schema
+  - 明確定義 positions schema
   - 釐清資料流向與服務解耦原則
 - 全 repo 文件路徑校正
   - 移除不存在的 web-bff 服務描述

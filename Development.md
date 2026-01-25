@@ -98,9 +98,9 @@ Before coding:
 - services/portfolio-service/tests/test_sync.py (新增完整測試案例)
 ```
 
-### Sprint 1-2: 實作 GET /portfolio/positions/latest
+### Sprint 1-2: 實作 GET /portfolio/positions
 ```markdown
-Task: 實作 portfolio-service 的 GET /portfolio/positions/latest 端點
+Task: 實作 portfolio-service 的 GET /portfolio/positions 端點
 Repo / Files:
 - services/portfolio-service/app/main.py
 - services/portfolio-service/app/position_calculator.py
@@ -109,19 +109,19 @@ Constraints:
 - 遵循 API_CONTRACTS.md 定義的 Response schema
 - 實作均價法計算邏輯（參考 Strategy.md）
 - 計算公式：avg_cost = Σ(buy_price × quantity) / total_quantity
-- 計算 unrealized_pnl（需從外部 API 取得 market_price，或暫用 mock）
+- `u_pnl` 固定為 0（帳務層不做估值）
 - 支援 user_id 篩選
 Tests:
 - pytest services/portfolio-service/tests/test_positions.py
 - 驗證方式：
   1. 準備測試資料（trades 表插入多筆買賣記錄）
-  2. 呼叫 GET /portfolio/positions/latest?user_id=test-user
+   2. 呼叫 GET /portfolio/positions?user_id=test-user
   3. 驗證 avg_cost 計算正確
-  4. 驗證 unrealized_pnl 計算正確（market_price 可先 mock）
+   4. 驗證 u_pnl 固定為 0
 Before coding:
-- services/portfolio-service/app/main.py (新增 /portfolio/positions/latest 端點)
+- services/portfolio-service/app/main.py (新增 /portfolio/positions 端點)
 - services/portfolio-service/app/position_calculator.py (均價法計算邏輯，約 60-100 行)
-- services/portfolio-service/app/db.py (新增 positions_snapshot 查詢與寫入)
+- services/portfolio-service/app/db.py (新增 positions 查詢與寫入)
 - services/portfolio-service/tests/test_positions.py (測試均價法計算)
 ```
 
@@ -273,7 +273,7 @@ Before coding:
 **下階段預告（Sprint 1-4.1）**：
 - 實作均價法純函數 `calculate_avg_cost()`
 - 讀取 trades 表並按 symbol 分組計算
-- 寫入 positions_snapshot 表
+- 寫入 positions 表
 - 測試實際計算邏輯的正確性
 
 #### Sprint 1-4.1: 均價法（Weighted Average Cost）純函數計算器與完整單元測試
@@ -485,8 +485,8 @@ Tests:
   2. 執行整合測試: pytest services/portfolio-service/tests/test_integration.py -v
   3. 測試完整流程：
      - 呼叫 POST /portfolio/sync（mock Google Sheets）
-     - 呼叫 GET /portfolio/positions/latest 確認均價法計算
-     - 呼叫 GET /portfolio/trades 確認資料可查詢
+   - 呼叫 GET /portfolio/positions 確認均價法計算
+   - 呼叫 GET /portfolio/trades/summary 確認資料可查詢
      - 測試各種錯誤情境
   4. 使用 curl 或 Postman 手動驗證端點
 Before coding:
@@ -522,7 +522,7 @@ Before coding:
 | Sprint | 目標 | 允許範圍 | 硬禁止項目 |
 |--------|------|---------|-----------|
 | **1-4.A** | FX 模組介面定義 | 介面 + Stub（同幣別可用、跨幣別必炸） | 真實 Provider、HTTP 請求、匯率 cache、估值計算 |
-| **1-4.3** | 帳務層重算 | positions 表寫入、均價計算、`unrealized_pnl=0` | 估值計算、匯率折算、呼叫 FX 模組、新增估值欄位 |
+| **1-4.3** | 帳務層重算 | positions 表寫入、均價計算、`u_pnl=0` | 估值計算、匯率折算、呼叫 FX 模組、新增估值欄位 |
 | **1-4.B** | 估值層實作 | 匯率 Provider、cache、`valuation_ccy` 欄位、市值計算 | 估值邏輯散落到非 `valuation_service.py` |
 
 ---
@@ -569,7 +569,7 @@ docker compose exec -T portfolio-service pytest -q -k fx --collect-only
 **範圍**（Scope）：
 - ✅ `POST /portfolio/rebuild_positions`：從 `trades` 表重算並**寫入** `positions` 表
 - ✅ 只做帳務：`quantity`（數量）、`avg_cost`（均價）、`realized_pnl`（已實現損益）
-- ❌ **不做估值**：不計算 `unrealized_pnl`（未實現損益固定為 0）
+- ❌ **不做估值**：不計算 `u_pnl`（未實現損益固定為 0）
 - ❌ **不做匯率折算**：不觸碰 `target_ccy`、不呼叫 FX 模組
 
 **依賴**（Dependencies）：
@@ -883,8 +883,8 @@ grep -rn "from app.fx" services/portfolio-service/app   --include="*.py"   --exc
 docker compose exec postgres psql -U investment -d investment_db -c   "SELECT column_name FROM information_schema.columns    WHERE table_name='positions'    AND column_name ~ '(valuation|market_value)';"
 # 期望：(0 rows)
 
-# 4. 確認 unrealized_pnl 預設值為 0
-docker compose exec postgres psql -U investment -d investment_db -c   "SELECT column_default FROM information_schema.columns    WHERE table_name='positions' AND column_name='unrealized_pnl';"
+# 4. 確認 u_pnl 欄位存在（帳務層固定填 0）
+docker compose exec postgres psql -U investment -d investment_db -c   "SELECT column_name FROM information_schema.columns    WHERE table_name='positions' AND column_name='u_pnl';"
 # 期望：'0'::numeric
 ```
 

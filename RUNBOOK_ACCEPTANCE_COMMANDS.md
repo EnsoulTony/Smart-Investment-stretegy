@@ -140,8 +140,8 @@ curl -s http://localhost:8001/openapi.json | jq '.paths | keys'
 # [
 #   "/health",
 #   "/portfolio/sync",
-#   "/portfolio/rebuild_positions/{user_id}",
-#   "/portfolio/positions/{user_id}"
+#   "/portfolio/rebuild_positions",
+#   "/portfolio/positions"
 # ]
 ```
 

@@ -6,7 +6,7 @@
 
 ### Portfolio Service 職責
 - 管理交易流水帳（`trades` 表）。
-- 計算均價法持倉（`positions_snapshot` 表）。
+- 計算均價法持倉（`positions` 表）。
 - 產出持倉快照，包含以下欄位：
   - `user_id`: 使用者 ID
   - `symbol`: 股票代號
@@ -14,11 +14,11 @@
   - `quantity`: 持有數量
   - `avg_cost`: 平均成本
   - `realized_pnl`: 已實現損益
-  - `unrealized_pnl`: 未實現損益（需搭配市價計算）
+  - `u_pnl`: 未實現損益（帳務層固定為 0）
   - `last_updated_at`: 最後更新時間
 
 ### Radar Service 職責
-- **只讀取** `positions_snapshot` 表，取得最新持倉快照。
+- **只讀取** `positions` 表，取得最新持倉快照。
 - **不直接接觸** `trades` 表，避免與 portfolio-service 耦合。
 - 讀取 `indicator_values` 表（例如 `RS_XLU_XLK`、`drawdown_pct`）。
 - 執行策略引擎分析，產出 `analysis_runs` 與 `recommendations`。
@@ -27,17 +27,17 @@
 ```
 [Google Sheets] 
     ↓
-[portfolio-service] → 寫入 trades → 計算 positions_snapshot
+[portfolio-service] → 寫入 trades → 計算 positions
                                           ↓
-                                    [radar-service] 讀取 positions_snapshot + indicator_values
+                                    [radar-service] 讀取 positions + indicator_values
                                           ↓
                                     產出 recommendations
 ```
 
 ### 重要原則
 - **單一資料來源**：持倉與交易資料由 portfolio-service 管理。
-- **服務解耦**：radar-service 透過 positions_snapshot 介面取得持倉資訊，不依賴 trades 實作細節。
-- **策略抽換性**：Radar v1.4 策略引擎可抽換，但 positions_snapshot schema 為穩定契約。
+- **服務解耦**：radar-service 透過 positions 介面取得持倉資訊，不依賴 trades 實作細節。
+- **策略抽換性**：Radar v1.4 策略引擎可抽換，但 positions schema 為穩定契約。
 
 ## 策略抽換邊界
 
@@ -66,8 +66,8 @@
 - 依照 `trades` 欄位中的買/賣紀錄計算平均成本。
 - 公式：
   - 平均成本 = (∑(買入價格 × 數量) − ∑(賣出價格 × 數量，若需調整)) / 淨持有數量。
-  - 未實現損益 = (現價 − 平均成本) × 淨持有數量。
-- 均價法結果寫入 `positions_snapshot` 與 `indicator_values`，供策略判斷核心持股是否仍在獲利。
+  - 未實現損益 = (現價 − 平均成本) × 淨持有數量（當前帳務層不計算，`u_pnl` 固定為 0）。
+- 均價法結果寫入 `positions` 與 `indicator_values`，供策略判斷核心持股是否仍在獲利。
 
 ## 趨勢條件與調整規則
 
@@ -118,7 +118,7 @@
 **❌ 硬禁止項目**（Sprint 1-4.3 階段）：
 - 呼叫 FX 模組（`from app.fx import ...`）
 - 匯率折算邏輯（`convert(amount, from_ccy, to_ccy)`）
-- 市價估值計算（`unrealized_pnl` 必須固定為 0）
+- 市價估值計算（`u_pnl` 必須固定為 0）
 - 新增估值欄位（`valuation_ccy`、`market_value`）
 
 ---
@@ -218,7 +218,7 @@ grep -rn "from app.fx" services/portfolio-service/app   --include="*.py"   --exc
 ❌ 禁止：                            ❌ 禁止：
 - 任何 DB driver (sqlalchemy/psycopg2) - fx.get_rate() / fx.convert()
 - DATABASE_URL 環境變數               - market_value 計算
-- postgresql:// 連線字串              - unrealized_pnl 計算（除 0 填充）
+- postgresql:// 連線字串              - u_pnl 計算（除 0 填充）
 ```
 
 #### 🔬 驗收證據（可證偽）
@@ -277,7 +277,7 @@ docker compose exec -T valuation-service pytest -q
 ❌ 禁止：                            ❌ 禁止：
 - 任何 DB driver (sqlalchemy/psycopg2) - fx.get_rate() / fx.convert()
 - DATABASE_URL 環境變數               - market_value 計算
-- postgresql:// 連線字串              - unrealized_pnl 計算（除 0 填充）
+- postgresql:// 連線字串              - u_pnl 計算（除 0 填充）
 ```
 
 #### 🔬 驗收證據（可證偽）

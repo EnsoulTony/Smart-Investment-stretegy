@@ -48,7 +48,7 @@ $ docker compose exec postgres psql -U investment -d investment_db -c "\d positi
  quantity        | numeric                  |           | not null | 
  avg_cost        | numeric                  |           | not null | 
  realized_pnl    | numeric                  |           | not null | '0'::numeric
- unrealized_pnl  | numeric                  |           | not null | '0'::numeric
+ u_pnl  | numeric                  |           | not null | '0'::numeric
  last_updated_at | timestamp with time zone |           | not null | now()
 Indexes:
     "positions_pkey" PRIMARY KEY, btree (id)
@@ -58,7 +58,7 @@ Indexes:
 **關鍵事實**：
 - ❌ **Position 表不存在 `valuation_ccy` 欄位**
 - ✅ 只有 `asset_ccy`（原幣別，來自 trade）
-- ✅ `unrealized_pnl` 預設值為 0（不做估值）
+- ✅ `u_pnl` 預設值為 0（不做估值）
 
 ### trades 表
 
@@ -212,7 +212,7 @@ services/portfolio-service/app/fx/interfaces.py:53:    def convert(
 
 **欄位策略**（符合帳務層規範）：
 - ✅ `asset_ccy`：來自 trade 原幣別
-- ✅ `unrealized_pnl`：固定填 0（**不做估值**）
+- ✅ `u_pnl`：固定填 0（**不做估值**）
 - ✅ **不呼叫 FX 模組**（已驗證無 `from app.fx` import）
 
 **測試覆蓋**：16 個測試通過 ✅
@@ -246,7 +246,7 @@ services/portfolio-service/app/fx/interfaces.py:53:    def convert(
 
 3. 估值計算流程
    - `valuation_ccy` 欄位寫入
-   - `unrealized_pnl` 真實計算（市價 - 成本）
+   - `u_pnl` 真實計算（市價 - 成本）
    - `market_value` 欄位
 
 4. 日線資料整合
@@ -286,7 +286,7 @@ class Position(Base):
     quantity: Decimal               # not null
     avg_cost: Decimal               # not null
     realized_pnl: Decimal           # not null, default 0
-    unrealized_pnl: Decimal         # not null, default 0（固定填 0，不做估值）
+   u_pnl: Decimal         # not null, default 0（固定填 0，不做估值）
     last_updated_at: datetime       # not null, default now()
     
     # Constraint: UNIQUE (user_id, symbol)
@@ -296,7 +296,7 @@ class Position(Base):
 - ❌ **不存在 `valuation_ccy` 欄位**
 - ❌ **不存在 `market_value` 欄位**
 - ✅ 只有 `asset_ccy`（原幣別）
-- ✅ `unrealized_pnl` 固定為 0（不做估值）
+- ✅ `u_pnl` 固定為 0（不做估值）
 
 ### 依賴套件（requirements.txt）
 **確認**：
@@ -436,7 +436,7 @@ curl -s http://localhost:8001/openapi.json | \
 - ❌ 市價計算邏輯（`quantity * market_price`）
 - ❌ 在 `positions` 表新增 `valuation_ccy` / `market_value` / `valuation_date` 欄位
 - ❌ 在 `position_rebuilder.py` / `avg_cost_calculator.py` 呼叫 FX 模組
-- ❌ `unrealized_pnl` 填入非零值（當前階段必須固定為 0）
+- ❌ `u_pnl` 填入非零值（當前階段必須固定為 0）
 
 **檢查命令**：
 ```bash
@@ -453,10 +453,10 @@ docker compose exec postgres psql -U investment -d investment_db -c \
    AND column_name ~ '(valuation|market_value)';"
 # 必須回傳 (0 rows)
 
-# 檢查 3：確認 unrealized_pnl 預設值為 0
+# 檢查 3：確認 u_pnl 預設值為 0
 docker compose exec postgres psql -U investment -d investment_db -c \
   "SELECT column_default FROM information_schema.columns \
-   WHERE table_name='positions' AND column_name='unrealized_pnl';"
+   WHERE table_name='positions' AND column_name='u_pnl';"
 # 必須回傳 '0'::numeric
 ```
 

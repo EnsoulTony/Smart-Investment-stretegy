@@ -169,8 +169,8 @@ curl -s http://localhost:8001/openapi.json | jq '.paths | keys'
 # [
 #   "/health",
 #   "/portfolio/sync",
-#   "/portfolio/rebuild_positions/{user_id}",
-#   "/portfolio/positions/{user_id}"
+#   "/portfolio/rebuild_positions",
+#   "/portfolio/positions"
 # ]
 ```
 
@@ -576,7 +576,7 @@ for symbol in symbols:
     db.add(pos)
 
 # ✅ 正確（在估值層 API 中即時計算）
-@app.get("/portfolio/positions/{user_id}")
+@app.get("/portfolio/positions")
 def get_positions(user_id: str):
     positions = db.query(Position).filter_by(user_id=user_id).all()
     fx = get_fx_provider()

@@ -284,7 +284,7 @@ ORDER BY symbol;
 #### 4. 若找到問題 symbol，檢查 Google Sheets 原始資料
 ```bash
 # 假設找到問題 symbol 是 XXXX
-curl "http://localhost:8001/portfolio/trades?user_id=tony&symbol=XXXX" | jq
+curl "http://localhost:8001/portfolio/trades/summary?user_id=tony&symbol=XXXX" | jq
 ```
 
 ---

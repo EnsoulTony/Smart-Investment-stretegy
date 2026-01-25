@@ -12,7 +12,7 @@
 - ✅ 建立骨架結構（Sprint 1-4.0）
 - ✅ 均價法計算邏輯（Sprint 1-4.1）
 - ✅ DB 查詢與預覽重算（Sprint 1-4.2）
-- ⏸ positions_snapshot 表寫入（Sprint 1-4.3）
+- ⏸ positions 表寫入（Sprint 1-4.3）
 - ⏸ 外幣折算（未來）
 """
 

@@ -16,7 +16,7 @@
 
 ### 2. 欄位策略（符合帳務層規範）
 ✅ **asset_ccy**: 來自 trade 的原幣別
-✅ **unrealized_pnl**: 固定填 0（不做估值）
+✅ **u_pnl**: 固定填 0（不做估值）
 ✅ **不呼叫 FX 模組**：帳務層硬禁止（已驗證無 `from app.fx` import）
 
 ### 3. API Schema 更新
@@ -34,7 +34,7 @@
 #### 新增測試檔案：test_rebuild_positions_write.py
 ✅ **test_rebuild_positions_writes_to_database**
    - 驗證正確寫入 `positions` 表
-   - 驗證 `asset_ccy`、`quantity`、`unrealized_pnl` 欄位
+   - 驗證 `asset_ccy`、`quantity`、`u_pnl` 欄位
    
 ✅ **test_rebuild_positions_idempotency**
    - 驗證重複執行結果一致
@@ -110,7 +110,7 @@ $ docker compose run --rm portfolio-service pytest -q tests/test_fx_guardrails.p
    - 結果：無匹配（符合規範）
 
 ✅ **不做估值**
-   - `unrealized_pnl` 固定填 0
+   - `u_pnl` 固定填 0
    - 不計算市價、不折算匯率
 
 ✅ **使用均價法計算器**
@@ -180,18 +180,18 @@ $ docker compose run --rm portfolio-service pytest -q tests/test_fx_guardrails.p
 
 ⏸ **valuation_ccy 欄位** (**已驗證：當前不存在**)
    - **證據**：執行 `docker compose exec postgres psql -U investment -d investment_db -c "\d positions"`  
-     結果僅有 9 個欄位：`id, user_id, symbol, asset_ccy, quantity, avg_cost, realized_pnl, unrealized_pnl, last_updated_at`
+   結果僅有 9 個欄位：`id, user_id, symbol, asset_ccy, quantity, avg_cost, realized_pnl, u_pnl, last_updated_at`
    - **現狀**：Position 表只有 `asset_ccy`（標的資產幣別），無 `valuation_ccy`（報表幣別）
    - **原因**：帳務層只負責累積交易，不涉及幣別轉換或估值
    - **硬禁止規則**：
      - ❌ Sprint 1-4.A/1-4.3 階段禁止新增 `valuation_ccy` / `market_value` / `valuation_date` 欄位
      - ❌ 禁止在帳務層（`position_rebuilder.py`）呼叫 FX 模組
-     - ❌ 禁止 `unrealized_pnl` 填入非零值
+   - ❌ 禁止 `u_pnl` 填入非零值
      - ✅ **唯一例外**：Sprint 1-4.B（估值層）可透過 Alembic migration 新增欄位
    - **建議**：未來 Sprint 1-4.B（估值層）實作時，透過 Alembic migration 新增此欄位
 
 ⏸ **估值層（未來 Sprint 1-4.B）**
-   - 當前 `unrealized_pnl` 固定為 0（帳務層不計算市價損益）
+   - 當前 `u_pnl` 固定為 0（帳務層不計算市價損益）
    - 未來 Sprint 1-4.B 將實作估值層（呼叫 FX 模組折算）
 
 ⏸ **Guardrail Tests**
@@ -269,7 +269,7 @@ alembic upgrade head
 | rebuild_positions 寫入 positions 表 | ✅ | test_rebuild_positions_writes_to_database |
 | 使用 avg_cost_calculator | ✅ | position_rebuilder.py 依賴 compute_avg_cost |
 | asset_ccy 來自 trade | ✅ | 測試驗證 `position.asset_ccy == "USD"` |
-| unrealized_pnl 填 0 | ✅ | 測試驗證 `position.unrealized_pnl == Decimal("0")` |
+| u_pnl 填 0 | ✅ | 測試驗證 `position.u_pnl == Decimal("0")` |
 | 不呼叫 FX 模組 | ✅ | grep 驗證無 `from app.fx` |
 | 冪等性 | ✅ | test_rebuild_positions_idempotency |
 | user_id 空字串 → 422 | ✅ | test_rebuild_positions_empty_user_id |
