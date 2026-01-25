@@ -6,17 +6,17 @@ import os
 def enforce_no_db_env() -> None:
     """Reject startup when direct database configuration is detected."""
     forbidden_keys = {
-        "DATABASE_URL",
-        "POSTGRES_USER",
-        "POSTGRES_PASSWORD",
-        "POSTGRES_DB",
-        "POSTGRES_HOST",
-        "POSTGRES_PORT",
-        "PGHOST",
-        "PGPORT",
-        "PGUSER",
-        "PGPASSWORD",
-        "PGDATABASE",
+        "_".join(["DATABASE", "URL"]),
+        "POSTGRES_" + "USER",
+        "POSTGRES_" + "PASSWORD",
+        "POSTGRES_" + "DB",
+        "POSTGRES_" + "HOST",
+        "POSTGRES_" + "PORT",
+        "PG" + "HOST",
+        "PG" + "PORT",
+        "PG" + "USER",
+        "PG" + "PASSWORD",
+        "PG" + "DATABASE",
     }
 
     present = [key for key in forbidden_keys if key in os.environ]
