@@ -1,10 +1,10 @@
 """Portfolio Service HTTP Client
 
-估值層與帳務層的唯一連接方式：HTTP API（禁止 DB 直連）
+估值層與帳務層的唯一連接方式：HTTP API（禁止直接 DB 連線）
 
 鐵律：
 - 只能透過 HTTP 取數
-- 禁止任何 DB library（sqlalchemy/psycopg2/asyncpg）
+- 禁止任何直接 DB library
 - BASE_URL 由環境變數控制（可測試、可切換環境）
 """
 
@@ -17,7 +17,7 @@ class PortfolioClient:
     """Portfolio Service HTTP Client
     
     取數來源：portfolio-service HTTP API
-    禁止：直接查詢 postgres DB
+    禁止：直接查詢資料庫
     """
     
     def __init__(self):

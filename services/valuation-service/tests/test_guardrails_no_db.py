@@ -14,6 +14,8 @@ import os
 import re
 from pathlib import Path
 
+from .guardrails_utils import strip_comments_and_docstrings, iter_lines
+
 
 # ============================================================================
 # 🚫 Guardrail 1: 禁止 requirements.txt 包含 DB driver
@@ -75,8 +77,8 @@ def test_codebase_no_db_connection_strings():
     violations = []
     
     for py_file in app_dir.rglob("*.py"):
-        with open(py_file, 'r') as f:
-            content = f.read()
+        content = py_file.read_text()
+        content = strip_comments_and_docstrings(content)
         
         # 檢查 DB 連線字串
         if re.search(r'postgresql://', content):
@@ -143,10 +145,9 @@ def test_codebase_no_sqlalchemy_usage():
     violations = []
     
     for py_file in app_dir.rglob("*.py"):
-        with open(py_file, 'r') as f:
-            lines = f.readlines()
-        
-        for i, line in enumerate(lines, 1):
+        content = strip_comments_and_docstrings(py_file.read_text())
+
+        for i, line in iter_lines(content):
             # 跳過註解
             if line.strip().startswith('#'):
                 continue
@@ -191,10 +192,9 @@ def test_codebase_no_psycopg2_usage():
     violations = []
     
     for py_file in app_dir.rglob("*.py"):
-        with open(py_file, 'r') as f:
-            lines = f.readlines()
-        
-        for i, line in enumerate(lines, 1):
+        content = strip_comments_and_docstrings(py_file.read_text())
+
+        for i, line in iter_lines(content):
             # 跳過註解
             if line.strip().startswith('#'):
                 continue
@@ -219,7 +219,15 @@ def test_codebase_no_psycopg2_usage():
 
 def test_compose_no_db_env_for_valuation_service():
     """掃描 docker-compose*.yml，禁止 valuation-service 注入 DB 連線資訊"""
-    repo_root = Path(__file__).resolve().parents[3]
+    repo_root = None
+    for parent in Path(__file__).resolve().parents:
+        if (parent / "docker-compose.yml").exists() or (parent / "docker-compose.test.yml").exists():
+            repo_root = parent
+            break
+
+    if repo_root is None:
+        pytest.skip("compose files not found")
+
     compose_files = [
         repo_root / "docker-compose.yml",
         repo_root / "docker-compose.test.yml",
@@ -241,17 +249,37 @@ def test_compose_no_db_env_for_valuation_service():
 
         lines = compose_path.read_text().splitlines()
         in_service = False
+        in_env_file_block = False
+        env_files: list[Path] = []
 
         for idx, line in enumerate(lines, 1):
             if line.startswith("  ") and not line.startswith("    "):
                 in_service = line.strip() == "valuation-service:"
+                in_env_file_block = False
 
             if not in_service:
                 continue
 
+            if line.strip().startswith("env_file:"):
+                in_env_file_block = True
+                continue
+            if in_env_file_block and line.strip().startswith("- "):
+                env_files.append((compose_path.parent / line.strip().lstrip("- ")).resolve())
+                continue
+            if in_env_file_block and line.strip() and not line.strip().startswith("-"):
+                in_env_file_block = False
+
             for env_key in forbidden_envs:
                 if env_key in line:
                     violations.append(f"{compose_path.name}:{idx} - {env_key}")
+
+        for env_path in env_files:
+            if not env_path.exists():
+                continue
+            for idx, line in enumerate(env_path.read_text().splitlines(), 1):
+                for env_key in forbidden_envs:
+                    if line.strip().startswith(env_key + "="):
+                        violations.append(f"{env_path.name}:{idx} - {env_key}")
 
     assert not violations, (
         "❌ 違反硬隔離規則：valuation-service 禁止注入 DB 連線設定！\n"

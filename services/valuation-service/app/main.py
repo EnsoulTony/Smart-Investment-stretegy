@@ -10,6 +10,7 @@ from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 
 from .portfolio_client import PortfolioClient
+from .guardrails import enforce_no_db_env
 
 
 app = FastAPI(
@@ -17,6 +18,9 @@ app = FastAPI(
     description="估值層服務（Sprint 1-4.B），API-only 取數邊界",
     version="1.4.B-skeleton"
 )
+
+# 啟動時強制檢查：估值層不得持有 DB 連線設定
+enforce_no_db_env()
 
 
 # ============================================================================
@@ -65,7 +69,7 @@ async def health_check():
         "capabilities": [
             "API-only data fetching (no DB connection)",
             "Skeleton endpoints for revalue & snapshots",
-            "Guardrails: no SQLAlchemy/psycopg2"
+            "Guardrails: no direct DB libraries"
         ]
     }
 
