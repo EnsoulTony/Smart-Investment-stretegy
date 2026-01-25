@@ -62,6 +62,40 @@ class PortfolioClient:
                 print(f"Warning: Failed to fetch positions: {e}")
                 return []
     
+    async def get_trades_summary(self, user_id: str) -> Dict[str, Any]:
+        """取得交易記錄摘要（前置條件檢查）
+        
+        用途：
+        - 在執行估值前先確認 trades 有資料
+        - 若 trades_count=0，提示需要先 sync
+        
+        Args:
+            user_id: 用戶 ID
+            
+        Returns:
+            {
+                "user_id": str,
+                "trades_count": int,
+                "symbols_count": int,
+                "min_trade_date": str | None,
+                "max_trade_date": str | None,
+                "evidence": {...}
+            }
+            
+        Raises:
+            httpx.HTTPError: HTTP 請求失敗
+        """
+        async with httpx.AsyncClient(timeout=self.timeout) as client:
+            url = f"{self.base_url}/portfolio/trades/summary"
+            
+            response = await client.get(
+                url,
+                params={"user_id": user_id}
+            )
+            response.raise_for_status()
+            
+            return response.json()
+    
     async def health_check(self) -> Dict[str, Any]:
         """檢查 portfolio-service 健康狀態"""
         async with httpx.AsyncClient(timeout=self.timeout) as client:

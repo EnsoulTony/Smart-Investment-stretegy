@@ -107,27 +107,41 @@ class PositionRebuilder:
                     broker=trade_orm.broker
                 )
                 grouped_trades[(trade_record.symbol, trade_record.asset_ccy)].append(trade_record)
-
-            from app.models import Position
-
-            upserted_count = 0
-            deleted_or_zeroed_count = 0
-
+            
+            # P1: Fail Fast 驗證 - 在開始 transaction 前先驗證所有 symbol
+            logger.info("開始 Fail Fast 驗證，user_id=%s, symbols_count=%d", user_id, len(grouped_trades))
+            validation_errors = []
+            
             for (symbol, asset_ccy), trades in grouped_trades.items():
-                state = compute_avg_cost(trades)
-                if state.qty == 0:
-                    deleted_or_zeroed_count += 1
-                    self.session.query(Position).filter(
-                        Position.user_id == user_id,
-                        Position.symbol == symbol
-                    ).delete(synchronize_session=False)
-                    continue
-
-                position = Position(
-                    user_id=user_id,
-                    symbol=symbol,
-                    asset_ccy=asset_ccy,
-                    quantity=state.qty,
+                try:
+                    # 只驗證計算邏輯，不使用結果
+                    compute_avg_cost(trades)
+                except ValueError as e:
+                    validation_errors.append({
+                        "symbol": symbol,
+                        "asset_ccy": asset_ccy,
+                        "error": str(e),
+                        "trades_count": len(trades),
+                        "first_trade_date": trades[0].trade_date.isoformat() if trades else None,
+                        "last_trade_date": trades[-1].trade_date.isoformat() if trades else None
+                    })
+                    logger.warning("驗證失敗，symbol=%s, error=%s", symbol, str(e))
+            
+            # 若有驗證錯誤，立即終止（不進 transaction）
+            if validation_errors:
+                error_summary = "\n".join([
+                    f"  • {e['symbol']} ({e['asset_ccy']}): {e['error']} (共 {e['trades_count']} 筆交易)"
+                    for e in validation_errors
+                ])
+                error_msg = (
+                    f"交易資料驗證失敗，發現 {len(validation_errors)} 個問題標的：\n{error_summary}\n\n"
+                    f"建議檢查 trades 資料：\n"
+                    f"  docker compose exec -T postgres psql -U postgres -d portfolio -c \\\n"
+                    f"    \"SELECT trade_date, action, quantity, price FROM trades WHERE user_id='{user_id}' "
+                    f"AND symbol='{validation_errors[0]['symbol']}' ORDER BY trade_date, created_at;\""
+                )
+                logger.error("Fail Fast 驗證失敗，user_id=%s, errors_count=%d", user_id, len(validation_errors))
+                raise ValueError(error_msg)
                     avg_cost=state.avg_cost,
                     realized_pnl=state.realized_pnl,
                     u_pnl=Decimal("0"),
@@ -157,8 +171,47 @@ class PositionRebuilder:
             logger.info("持倉重算完成，user_id=%s, result=%s", user_id, result)
             return result
 
+        except ValueError as e:
+            # P0: 業務邏輯錯誤（例如：賣空、資料驗證失敗）
+            logger.exception("持倉重算失敗（業務錯誤），user_id=%s, error=%s", user_id, str(e))
+            self.session.rollback()
+            
+            # 嘗試從錯誤訊息提取 symbol
+            error_symbol = None
+            error_str = str(e)
+            if "symbol=" in error_str:
+                import re
+                match = re.search(r'symbol=(\w+)', error_str)
+                if match:
+                    error_symbol = match.group(1)
+            
+            return {
+                "status": "failed",
+                "user_id": user_id,
+                "symbols_count": 0,
+                "upserted_count": 0,
+                "deleted_or_zeroed_count": 0,
+                "run_id": str(uuid4()),
+                "evidence": {
+                    "error_type": "ValueError",
+                    "error_message": error_str,
+                    "error_symbol": error_symbol,
+                    "positions_columns": [],
+                    "verification_sql": {
+                        "trades_count": f"select count(*) from trades where user_id='{user_id}';",
+                        "distinct_symbols": f"select count(distinct symbol) from trades where user_id='{user_id}';",
+                        "trades_for_error_symbol": (
+                            f"select trade_date, action, quantity, price from trades "
+                            f"where user_id='{user_id}' and symbol='{error_symbol}' "
+                            f"order by trade_date, created_at;"
+                        ) if error_symbol else None
+                    }
+                }
+            }
+        
         except Exception as e:
-            logger.exception("持倉重算失敗，user_id=%s, error=%s", user_id, str(e))
+            # 系統錯誤（資料庫連線、未預期的 exception 等）
+            logger.exception("持倉重算失敗（系統錯誤），user_id=%s, error=%s", user_id, str(e))
             self.session.rollback()
             return {
                 "status": "failed",
@@ -168,7 +221,12 @@ class PositionRebuilder:
                 "deleted_or_zeroed_count": 0,
                 "run_id": str(uuid4()),
                 "evidence": {
-                    "positions_columns": []
+                    "error_type": e.__class__.__name__,
+                    "error_message": str(e),
+                    "positions_columns": [],
+                    "verification_sql": {
+                        "trades_count": f"select count(*) from trades where user_id='{user_id}';"
+                    }
                 }
             }
 

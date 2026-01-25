@@ -1360,3 +1360,449 @@ docker compose exec -T portfolio-service pytest -q tests/test_guardrails_account
 ```
 
 ---
+
+# 標準刷新流程（Sync → Summary → Rebuild）
+
+**目標**：提供標準化、可機器執行的流程，確保不會再遇到 "rebuild succeeded but symbols_count=0" 問題。
+
+**核心工具**：`tools/portfolio_refresh.sh`
+
+**使用場景**：
+- 新用戶首次刷新 portfolio
+- 定期更新交易資料
+- automation / CI 流程
+- 手動運維操作
+
+---
+
+## 🛠️ 工具腳本：portfolio_refresh.sh
+
+### 功能
+
+自動化執行完整刷新流程：
+1. 檢查 trades/summary
+2. 若 trades_count=0 → 執行 sync
+3. 執行 rebuild_positions（require_trades=1）
+4. 輸出可證偽的 evidence
+
+### 使用方式
+
+```bash
+# 基本用法
+./tools/portfolio_refresh.sh <user_id>
+
+# 範例
+./tools/portfolio_refresh.sh tony
+
+# 自定義 API endpoint（環境變數）
+PORTFOLIO_API=http://localhost:8001 ./tools/portfolio_refresh.sh tony
+```
+
+### 退出碼
+
+- **0**: 成功（positions 已刷新）
+- **1**: sync 失敗或 trades 仍為 0
+- **2**: rebuild 失敗（前置條件不滿足或其他錯誤）
+- **3**: 參數錯誤
+
+---
+
+## 📋 完整流程範例（可複製執行）
+
+### 情境 A：全新用戶（trades=0）
+
+```bash
+# Step 1: 執行標準刷新流程
+./tools/portfolio_refresh.sh tony
+
+# 預期輸出：
+# === Portfolio Refresh Tool ===
+# User: tony
+# 
+# 📋 Step 1: 檢查 trades summary
+# GET http://localhost:8001/portfolio/trades/summary?user_id=tony
+# HTTP 200
+#   trades_count: 0
+#   symbols_count: 0
+#   🔍 Verification SQL:
+#     select count(*) from trades where user_id='tony';
+# 
+# ⚠️  trades_count=0，需要執行 sync
+# 
+# 📥 Step 2: 執行 sync
+# POST http://localhost:8001/portfolio/sync?user_id=tony
+# HTTP 200
+#   status: succeeded
+#   synced_count: 66
+# 
+# 🔄 Step 2b: 再次檢查 trades summary
+# GET http://localhost:8001/portfolio/trades/summary?user_id=tony
+# HTTP 200
+#   trades_count: 66
+#   symbols_count: 5
+# ✅ sync 成功，trades_count=66
+# 
+# 🔨 Step 3: 執行 rebuild_positions (require_trades=1)
+# POST http://localhost:8001/portfolio/rebuild_positions?user_id=tony&require_trades=1
+# HTTP 200
+#   status: succeeded
+#   symbols_count: 5
+#   upserted_count: 5
+#   deleted_or_zeroed_count: 0
+# 
+# 🔍 Evidence (可證偽):
+# {
+#   "require_trades": true,
+#   "decision": "proceed",
+#   "trades_count": 66,
+#   "distinct_symbols_count": 5,
+#   "verification_sql": {
+#     "trades_count": "select count(*) from trades where user_id='tony';",
+#     "distinct_symbols": "select count(distinct symbol) from trades where user_id='tony';",
+#     "positions_count": "select count(*) from positions where user_id='tony';"
+#   },
+#   ...
+# }
+# 
+# 📊 可執行的驗證 SQL:
+#   Trades:    select count(*) from trades where user_id='tony';
+#   Positions: select count(*) from positions where user_id='tony';
+# 
+# ✅ Portfolio refresh 成功！
+#   - trades: 66 筆
+#   - symbols: 5 個
+#   - positions: 5 筆寫入
+
+# Step 2: DB 驗證
+docker compose exec -T postgres psql -U investment -d investment_db -c \
+"SELECT user_id, symbol, quantity, ROUND(avg_cost::numeric, 2) as avg_cost 
+FROM positions WHERE user_id='tony' ORDER BY symbol;"
+
+# 預期：5 rows（AAPL, GOOGL, MSFT, NVDA, TSLA）
+```
+
+### 情境 B：已有 trades 的用戶（跳過 sync）
+
+```bash
+./tools/portfolio_refresh.sh tony
+
+# 預期輸出：
+# === Portfolio Refresh Tool ===
+# User: tony
+# 
+# 📋 Step 1: 檢查 trades summary
+# GET http://localhost:8001/portfolio/trades/summary?user_id=tony
+# HTTP 200
+#   trades_count: 66
+#   symbols_count: 5
+# ✅ trades 已有資料，跳過 sync
+# 
+# 🔨 Step 3: 執行 rebuild_positions (require_trades=1)
+# HTTP 200
+#   status: succeeded
+#   symbols_count: 5
+#   upserted_count: 5
+# 
+# ✅ Portfolio refresh 成功！
+```
+
+### 情境 C：sync 後仍無 trades（失敗處理）
+
+```bash
+./tools/portfolio_refresh.sh nonexistent_user
+
+# 預期輸出：
+# === Portfolio Refresh Tool ===
+# User: nonexistent_user
+# 
+# 📋 Step 1: 檢查 trades summary
+# HTTP 200
+#   trades_count: 0
+#   symbols_count: 0
+# 
+# ⚠️  trades_count=0，需要執行 sync
+# 
+# 📥 Step 2: 執行 sync
+# HTTP 200
+#   status: succeeded
+#   synced_count: 0
+# 
+# 🔄 Step 2b: 再次檢查 trades summary
+# HTTP 200
+#   trades_count: 0
+#   symbols_count: 0
+# 
+# ❌ sync 後 trades_count 仍為 0，無法繼續
+# 可能原因：
+#   - Google Sheets 沒有該用戶的交易資料
+#   - Sheets 權限問題
+#   - sync 服務配置錯誤
+# 
+# 🔍 Evidence:
+# {
+#   "user_id": "nonexistent_user",
+#   "trades_count": 0,
+#   "symbols_count": 0,
+#   "evidence": {...}
+# }
+
+# Exit code: 1
+echo $?  # 輸出：1
+```
+
+---
+
+## 🔧 Automation 整合
+
+### Makefile Target
+
+```makefile
+# 添加到專案 Makefile
+.PHONY: portfolio-refresh
+portfolio-refresh:
+	@echo "執行 portfolio refresh..."
+	./tools/portfolio_refresh.sh $(USER_ID)
+
+# 使用方式
+# make portfolio-refresh USER_ID=tony
+```
+
+### CI/CD 流程
+
+```yaml
+# GitHub Actions / GitLab CI 範例
+- name: Refresh Portfolio
+  run: |
+    ./tools/portfolio_refresh.sh tony
+    if [ $? -ne 0 ]; then
+      echo "❌ Portfolio refresh 失敗"
+      exit 1
+    fi
+```
+
+### Cron Job
+
+```bash
+# 每日 6:00 自動刷新
+0 6 * * * cd /path/to/Smart-Investment-stretegy && ./tools/portfolio_refresh.sh tony >> /var/log/portfolio_refresh.log 2>&1
+```
+
+---
+
+## 🧪 驗收命令（可複製執行）
+
+```bash
+# 1. 確保工具腳本可執行
+ls -la tools/portfolio_refresh.sh
+# 預期：-rwxr-xr-x ... portfolio_refresh.sh
+
+# 2. 執行完整流程（假設 tony 無 trades）
+./tools/portfolio_refresh.sh tony
+
+# 3. 驗證 positions 表有資料
+docker compose exec -T postgres psql -U investment -d investment_db -c \
+"SELECT COUNT(*) as positions_count FROM positions WHERE user_id='tony';"
+# 預期：positions_count > 0
+
+# 4. 驗證 evidence SQL 可執行
+docker compose exec -T postgres psql -U investment -d investment_db -c \
+"select count(*) from trades where user_id='tony';"
+# 預期：count > 0
+
+# 5. 測試 valuation-service 前置檢查
+curl -s -X POST http://localhost:8002/valuation/revalue \
+  -H "Content-Type: application/json" \
+  -d '{"user_id":"empty_user"}' | jq
+
+# 預期（若 empty_user 無 trades）：
+# {
+#   "status": "no_data",
+#   "user_id": "empty_user",
+#   "message": "前置條件不滿足：trades_count=0，需要先執行 sync。使用 tools/portfolio_refresh.sh empty_user 自動執行完整流程。Evidence: {...}"
+# }
+
+# 6. 驗證 valuation-service 不直連 DB（guardrails）
+docker compose exec -T valuation-service pytest -q tests/test_guardrails_no_db_access.py
+# 預期：passed
+```
+
+---
+
+## 🔍 可證偽性驗證
+
+### Evidence 結構檢查
+
+```bash
+# 取得 trades/summary evidence
+curl -s "http://localhost:8001/portfolio/trades/summary?user_id=tony" | jq .evidence
+
+# 必須包含：
+# {
+#   "verification_sql": {
+#     "trades_count": "select count(*) from trades where user_id='tony';",
+#     "distinct_symbols": "select count(distinct symbol) from trades where user_id='tony';"
+#   }
+# }
+
+# 取得 rebuild evidence
+curl -s -X POST "http://localhost:8001/portfolio/rebuild_positions?user_id=tony&require_trades=1" | jq .evidence
+
+# 必須包含：
+# {
+#   "require_trades": true,
+#   "decision": "proceed",
+#   "trades_count": 66,
+#   "distinct_symbols_count": 5,
+#   "verification_sql": {
+#     "trades_count": "...",
+#     "distinct_symbols": "...",
+#     "positions_count": "..."
+#   }
+# }
+```
+
+### 手動執行 Verification SQL
+
+```bash
+# 從 evidence 複製 SQL 執行
+docker compose exec -T postgres psql -U investment -d investment_db -c \
+"select count(*) from trades where user_id='tony';"
+
+# 結果應與 API 回傳的 trades_count 一致
+
+docker compose exec -T postgres psql -U investment -d investment_db -c \
+"select count(distinct symbol) from trades where user_id='tony';"
+
+# 結果應與 API 回傳的 symbols_count 一致
+```
+
+---
+
+## 🚫 禁止事項（強制規則）
+
+### ❌ 禁止手動跳過 require_trades
+
+```bash
+# ❌ 錯誤：手動 rebuild 不帶 require_trades=1
+curl -X POST http://localhost:8001/portfolio/rebuild_positions?user_id=tony
+
+# ✅ 正確：使用工具腳本（自動帶 require_trades=1）
+./tools/portfolio_refresh.sh tony
+
+# ✅ 正確：手動呼叫必須帶 require_trades=1
+curl -X POST "http://localhost:8001/portfolio/rebuild_positions?user_id=tony&require_trades=1"
+```
+
+### ❌ 禁止 valuation-service 直連 DB
+
+```bash
+# 驗證 guardrails
+docker compose exec -T valuation-service env | grep DATABASE
+# 預期：無任何 DATABASE_URL 或類似環境變數
+
+docker compose exec -T valuation-service pytest -q tests/test_guardrails_no_db_access.py
+# 預期：passed（禁止 DB library import）
+```
+
+### ❌ 禁止 rebuild 內部偷偷呼叫 sync
+
+```bash
+# 驗證：即使 trades=0，rebuild 也不會自動 sync
+# 1. 清空 trades
+docker compose exec -T postgres psql -U investment -d investment_db -c \
+"DELETE FROM trades WHERE user_id='test_user';"
+
+# 2. 呼叫 rebuild（require_trades=1）
+curl -s -X POST "http://localhost:8001/portfolio/rebuild_positions?user_id=test_user&require_trades=1"
+# 預期：HTTP 409，status="precondition_failed"（不會自動 sync）
+
+# 3. 必須手動 sync 或使用工具腳本
+./tools/portfolio_refresh.sh test_user
+```
+
+---
+
+## 📊 成功指標
+
+✅ **工具腳本可執行且回傳 exit code 0**：
+```bash
+./tools/portfolio_refresh.sh tony && echo "成功"
+```
+
+✅ **positions 表有資料**：
+```bash
+docker compose exec -T postgres psql -U investment -d investment_db -c \
+"SELECT COUNT(*) FROM positions WHERE user_id='tony';" | grep -v "count" | grep -v "-" | tr -d ' ' | grep -E '^[0-9]+$'
+# 數字 > 0
+```
+
+✅ **evidence 包含可執行的 verification_sql**：
+```bash
+curl -s "http://localhost:8001/portfolio/trades/summary?user_id=tony" | jq -e '.evidence.verification_sql.trades_count'
+# 回傳 SQL 字串
+```
+
+✅ **valuation-service 前置檢查生效**：
+```bash
+curl -s -X POST http://localhost:8002/valuation/revalue \
+  -H "Content-Type: application/json" \
+  -d '{"user_id":"empty_user"}' | jq -r .status
+# 若 empty_user 無 trades，回傳 "no_data"
+```
+
+---
+
+## 🔥 故障排除
+
+### 問題 1：工具腳本執行失敗（exit code != 0）
+
+**診斷**：
+```bash
+# 檢查詳細輸出
+./tools/portfolio_refresh.sh tony
+# 查看每一步的 HTTP 狀態碼與回應
+
+# 檢查 API 可達性
+curl -s http://localhost:8001/health | jq
+curl -s http://localhost:8001/portfolio/trades/summary?user_id=tony | jq
+```
+
+**常見原因**：
+- portfolio-service 未啟動：`docker compose ps portfolio-service`
+- 網路問題：檢查 `PORTFOLIO_API` 環境變數
+- sync 失敗：Google Sheets 權限或資料格式問題
+
+### 問題 2：trades/summary 回傳 404
+
+**診斷**：
+```bash
+curl -v http://localhost:8001/portfolio/trades/summary?user_id=tony
+```
+
+**解決**：
+```bash
+# 確認 portfolio-service 已重建（包含新端點）
+docker compose up -d --build portfolio-service
+docker compose logs -f portfolio-service
+```
+
+### 問題 3：valuation-service 沒有攔截 trades=0
+
+**診斷**：
+```bash
+# 檢查 valuation-service 是否已重建
+docker compose logs valuation-service | grep "trades/summary"
+
+# 測試 trades=0 的情況
+curl -s -X POST http://localhost:8002/valuation/revalue \
+  -H "Content-Type: application/json" \
+  -d '{"user_id":"definitely_empty_user"}' | jq .status
+```
+
+**解決**：
+```bash
+# 重建 valuation-service
+docker compose up -d --build valuation-service
+```
+
+---
