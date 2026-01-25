@@ -2,11 +2,12 @@
 
 import pytest
 
-from app.guardrails import validate_no_db_env
+from app.guardrails import validate_runtime_env
 
 
 FORBIDDEN_KEYS = [
     "_".join(["DATABASE", "URL"]),
+    "_".join(["PORTFOLIO", "DATABASE", "URL"]),
     "POSTGRES_" + "USER",
     "POSTGRES_" + "PASSWORD",
     "POSTGRES_" + "DB",
@@ -27,7 +28,8 @@ def _clear_db_env(monkeypatch: pytest.MonkeyPatch) -> None:
 
 def test_guard_allows_clean_env(monkeypatch: pytest.MonkeyPatch) -> None:
     _clear_db_env(monkeypatch)
-    validate_no_db_env()
+    status = validate_runtime_env()
+    assert status["status"] == "ok"
 
 
 def test_guard_blocks_db_env_injection(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -35,8 +37,8 @@ def test_guard_blocks_db_env_injection(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("_".join(["DATABASE", "URL"]), "x")
 
     with pytest.raises(RuntimeError) as exc:
-        validate_no_db_env()
+        validate_runtime_env()
 
     message = str(exc.value)
-    assert "[GUARDRAIL][VAL-SVC-NO-DB][v1.0.0]" in message
-    assert "evidence.hit_env_keys_masked=[" in message
+    assert "[GUARDRAIL][VAL-SVC-NO-DB][v1.1.0]" in message
+    assert "evidence.blocked_keys=[" in message

@@ -937,6 +937,42 @@ def downgrade() -> None:
     op.drop_column('positions', 'valuation_ccy')
 ```
 
+**驗收命令（可證偽）**：
+```bash
+# 估值層健康檢查
+curl -s http://localhost:8005/health | jq
+
+# 成功案例（trades 有資料）
+curl -s "http://localhost:8005/valuation/portfolio?user_id=tony&base_ccy=USD&as_of=2026-01-24" | jq
+
+# 失敗案例（trades_count=0）
+curl -s -i "http://localhost:8005/valuation/portfolio?user_id=empty_user" | sed -n '1,20p'
+```
+
+**成功輸出範例（節錄）**：
+```json
+{
+   "status": "succeeded",
+   "evidence": {
+      "positions_count": 1,
+      "positions_hash": "<sha256>",
+      "trades_count": 2,
+      "distinct_symbols_count": 1,
+      "providers": {"price_provider": "stub", "fx_provider": "stub"}
+   }
+}
+```
+
+**失敗輸出範例（節錄）**：
+```json
+{
+   "detail": {
+      "status": "precondition_failed",
+      "evidence": {"trades_count": 0}
+   }
+}
+```
+
 ---
 
 ### FX 模組擴充檢查清單（Sprint 1-4.B 準備）

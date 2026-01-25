@@ -1049,38 +1049,81 @@ grep -rn "fx\.convert\|fx\.get_rate" \
 - Debug 時無法確定「這個數字是原始金額還是折算後金額」
 - 測試時無法隔離帳務邏輯與估值邏輯
 
-#### Sprint 1-4.B 驗收：valuation-service 骨架
+#### Sprint 1-4.B 驗收：valuation-service 估值 API
 
-**目的**：建立估值層服務，嚴格遵守「API-only 取數邊界」。
+**目的**：落實估值層 API（HTTP-only 取數），並提供可證偽 evidence。
 
 **檢查命令**：
 
 ```bash
-# 1. 啟動 valuation-service
-docker compose up -d --build valuation-service
+# 1. 啟動估值服務
+docker compose up -d --build valuation-service portfolio-service
 
-# 2. 健康檢查
+# 2. 健康檢查（含 runtime guard 狀態）
 curl -s http://localhost:8005/health | jq
-# 期望：{"status": "healthy", "portfolio_base_url": "http://portfolio-service:8001"}
+# 期望欄位：service_name, portfolio_base_url, providers, runtime_guard_status
 
-# 3. 確認環境變數
-docker compose exec -T valuation-service python -c "import os; print(os.getenv('PORTFOLIO_BASE_URL'))"
-# 期望：http://portfolio-service:8001
+# 3. 估值 API（成功案例）
+curl -s "http://localhost:8005/valuation/portfolio?user_id=tony&base_ccy=USD&as_of=2026-01-24" | jq
+# 期望：status=succeeded + evidence.positions_hash + items[].fx_rate_to_base
 
-# 4. 驗證 Guardrails（禁止 DB driver）
-docker compose exec -T valuation-service pytest -q tests/test_guardrails_no_db.py
-# 期望：4 passed（4 個禁止規則 + 1 個正向檢查）
+# 4. 估值 API（失敗案例：trades_count=0）
+curl -s -i "http://localhost:8005/valuation/portfolio?user_id=empty_user" | sed -n '1,20p'
+# 期望：HTTP 409 + detail.status=precondition_failed + evidence.trades_count=0
 
-# 5. 驗證 portfolio-service Guardrails（禁止估值邏輯）
-docker compose exec -T portfolio-service pytest -q tests/test_guardrails_accounting_boundary.py
-# 期望：4 passed（帳務層禁止 FX 呼叫、估值計算）
+# 5. Guardrails 測試（禁止 DB driver / DB env）
+docker compose exec -T valuation-service pytest -q
+# 期望：全部通過
 ```
 
-**架構鐵律**：
-- ✅ valuation-service 只能透過 HTTP 從 portfolio-service 取數
-- ❌ valuation-service 禁止任何 DB library（sqlalchemy/psycopg2）
-- ✅ portfolio-service 只做帳務（avg_cost, realized_pnl），不做估值
-- ❌ portfolio-service 禁止匯率折算（fx.convert/fx.get_rate）
+**成功輸出範例（節錄）**：
+```json
+{
+  "status": "succeeded",
+  "user_id": "tony",
+  "base_ccy": "USD",
+  "as_of": "2026-01-24",
+  "items": [
+    {
+      "symbol": "AAPL",
+      "asset_ccy": "USD",
+      "price": 18.5,
+      "fx_rate_to_base": 1.0,
+      "market_value": 185.0,
+      "unrealized_pnl":  -15.0
+    }
+  ],
+  "evidence": {
+    "positions_count": 1,
+    "positions_hash": "<sha256>",
+    "trades_count": 2,
+    "distinct_symbols_count": 1,
+    "verification_sql": {
+      "trades_count": "select count(*) from trades where user_id='tony';",
+      "distinct_symbols": "select count(distinct symbol) from trades where user_id='tony';"
+    },
+    "providers": {
+      "price_provider": "stub",
+      "fx_provider": "stub",
+      "as_of": "2026-01-24"
+    }
+  }
+}
+```
+
+**失敗輸出範例（節錄）**：
+```json
+{
+  "detail": {
+    "status": "precondition_failed",
+    "user_id": "empty_user",
+    "evidence": {
+      "trades_count": 0,
+      "distinct_symbols_count": 0
+    }
+  }
+}
+```
 
 ---
 

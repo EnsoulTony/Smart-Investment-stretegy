@@ -17,15 +17,10 @@ def test_health_check():
     
     data = response.json()
     assert data["status"] == "healthy"
-    assert data["service"] == "valuation-service"
+    assert data["service_name"] == "valuation-service"
     assert "portfolio_base_url" in data
-    assert "capabilities" in data
-    
-    # 確認宣告了關鍵能力
-    capabilities = data["capabilities"]
-    assert any("API-only" in cap for cap in capabilities)
-    assert any("no DB" in cap for cap in capabilities)
-    assert any("Guardrails" in cap for cap in capabilities)
+    assert "providers" in data
+    assert "runtime_guard_status" in data
 
 
 def test_health_check_exposes_portfolio_base_url():

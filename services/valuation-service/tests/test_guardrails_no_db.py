@@ -70,7 +70,8 @@ def test_codebase_no_db_connection_strings():
     違規模式：
     - postgresql://
     - mysql://
-    - DATABASE_URL（直接讀取 DB URL）
+    - DATABASE_URL / PORTFOLIO_DATABASE_URL
+    - POSTGRES_* / PGHOST / PGPORT / PGUSER / PGPASSWORD
     """
     app_dir = Path(__file__).parent.parent / "app"
     
@@ -88,9 +89,15 @@ def test_codebase_no_db_connection_strings():
             violations.append(f"{py_file.name}: mysql:// connection string")
         
         # 允許讀取 PORTFOLIO_BASE_URL（這是 HTTP URL）
-        # 但禁止讀取 DATABASE_URL
+        # 但禁止讀取 DB 相關 env key
         if re.search(r'DATABASE_URL', content):
             violations.append(f"{py_file.name}: DATABASE_URL (DB connection)")
+        if re.search(r'PORTFOLIO_DATABASE_URL', content):
+            violations.append(f"{py_file.name}: PORTFOLIO_DATABASE_URL (DB connection)")
+        if re.search(r'POSTGRES_', content):
+            violations.append(f"{py_file.name}: POSTGRES_ env")
+        if re.search(r'PGHOST|PGPORT|PGUSER|PGPASSWORD|PGDATABASE', content):
+            violations.append(f"{py_file.name}: PG* env")
     
     assert not violations, (
         f"❌ 違反 Sprint 1-4.B 鐵律：valuation-service 禁止 DB 連線！\n"

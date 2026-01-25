@@ -7,13 +7,16 @@ Sprint Next：添加 trades/summary 前置條件檢查
 import os
 import re
 import json
-from typing import Optional
+import hashlib
+from typing import Optional, Any
+from decimal import Decimal
 from datetime import date
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 
 from .portfolio_client import PortfolioClient
-from .guardrails import validate_no_db_env
+from .guardrails import validate_runtime_env
+from .providers import PriceProvider, FxProvider
 
 
 app = FastAPI(
@@ -23,7 +26,7 @@ app = FastAPI(
 )
 
 # 啟動時強制檢查：估值層不得持有 DB 連線設定
-validate_no_db_env()
+RUNTIME_GUARD_STATUS = validate_runtime_env()
 
 
 # ============================================================================
@@ -87,33 +90,44 @@ def _mask_env_keys_in_evidence(evidence: dict) -> dict:
     return mask_dict(masked)
 
 
+def _canonical_json_hash(payload: Any) -> str:
+    canonical = json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False, default=str)
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
+def _to_decimal(value: Any) -> Decimal:
+    try:
+        return Decimal(str(value))
+    except Exception:
+        return Decimal("0")
+
+
 # ============================================================================
 # Schemas
 # ============================================================================
 
-class RevalueRequest(BaseModel):
-    """重新估值請求"""
-    user_id: str
-    asof_date: Optional[date] = None  # None = 使用今日
-
-
-class RevalueResponse(BaseModel):
-    """重新估值回應"""
-    status: str
-    user_id: str
-    asof_date: date
-    positions_count: int
-    message: str
-
-
-class ValuationSnapshot(BaseModel):
-    """估值快照（骨架版）"""
-    user_id: str
+class ValuationItem(BaseModel):
+    """估值結果項目"""
     symbol: str
     asset_ccy: str
     quantity: float
     avg_cost: float
-    # 未來擴充：market_price, market_value, unrealized_pnl
+    price: float
+    price_ccy: str
+    base_ccy: str
+    fx_rate_to_base: float
+    market_value: float
+    unrealized_pnl: float
+
+
+class ValuationResponse(BaseModel):
+    """估值回應"""
+    status: str
+    user_id: str
+    base_ccy: str
+    as_of: date
+    items: list[ValuationItem]
+    evidence: dict
 
 
 # ============================================================================
@@ -124,114 +138,114 @@ class ValuationSnapshot(BaseModel):
 async def health_check():
     """健康檢查端點"""
     portfolio_base_url = os.getenv("PORTFOLIO_BASE_URL", "http://portfolio-service:8001")
-    
+
     return {
         "status": "healthy",
-        "service": "valuation-service",
-        "version": "1.4.B-skeleton",
+        "service_name": "valuation-service",
         "portfolio_base_url": portfolio_base_url,
-        "capabilities": [
-            "API-only data fetching (no DB connection)",
-            "Skeleton endpoints for revalue & snapshots",
-            "Guardrails: no direct DB libraries",
-            "Precondition check: trades/summary before revalue"
-        ]
+        "providers": {
+            "price_provider": PriceProvider.provider_name(),
+            "fx_provider": FxProvider.provider_name(),
+        },
+        "runtime_guard_status": RUNTIME_GUARD_STATUS,
     }
 
 
-@app.post("/valuation/revalue", response_model=RevalueResponse)
-async def revalue_positions(request: RevalueRequest):
-    """重新估值（骨架版）
-    
-    流程：
-    0. 檢查 trades 是否有資料（前置條件）
-    1. 透過 HTTP 從 portfolio-service 取得 positions（帳務層數據）
-    2. （未來）透過 FX provider 取得匯率
-    3. （未來）透過 market data provider 取得市價
-    4. （未來）計算 market_value 與 unrealized_pnl
-    5. （未來）寫入 valuation_snapshots 表（估值層專屬表）
-    
-    Sprint 1-4.B：只實作骨架，確認 API-only 取數正常
-    Sprint Next：增加 trades/summary 前置條件檢查
-    """
-    from datetime import date as date_module
-    
-    asof = request.asof_date or date_module.today()
-    
-    # 透過 HTTP client 取得帳務層數據
+@app.get("/valuation/portfolio", response_model=ValuationResponse)
+async def valuation_portfolio(user_id: str, base_ccy: str = "USD", as_of: Optional[date] = None):
+    """估值 API（Sprint 1-4.B）"""
+    as_of = as_of or date.today()
+
     client = PortfolioClient()
-    
-    # 前置條件檢查：trades 是否有資料
     try:
-        trades_summary = await client.get_trades_summary(request.user_id)
-        trades_count = trades_summary.get("trades_count", 0)
-        
-        if trades_count == 0:
-            # 遮罩 evidence 中的環境變數（若有）
-            evidence = trades_summary.get("evidence", {})
-            masked_evidence = _mask_env_keys_in_evidence(evidence)
-            
-            return RevalueResponse(
-                status="no_data",
-                user_id=request.user_id,
-                asof_date=asof,
-                positions_count=0,
-                message=f"前置條件不滿足：trades_count=0，需要先執行 sync。使用 tools/portfolio_refresh.sh {request.user_id} 自動執行完整流程。Evidence: {json.dumps(masked_evidence)}"
-            )
-    except Exception as e:
-        # trades/summary 失敗，但不阻斷整個流程（前向相容）
-        print(f"Warning: Failed to check trades summary: {e}")
-    
-    try:
-        positions = await client.get_positions(request.user_id)
+        trades_summary = await client.get_trades_summary(user_id)
     except Exception as e:
         raise HTTPException(
             status_code=502,
-            detail=f"Failed to fetch positions from portfolio-service: {str(e)}"
+            detail={
+                "status": "upstream_error",
+                "service": "portfolio-service",
+                "operation": "trades_summary",
+                "message": str(e),
+            },
         )
-    
-    # 骨架版：只回傳取數結果，不做實際估值
-    return RevalueResponse(
-        status="skeleton",
-        user_id=request.user_id,
-        asof_date=asof,
-        positions_count=len(positions),
-        message=f"骨架版：成功取得 {len(positions)} 筆 positions（未來將實作估值邏輯）"
+
+    trades_count = int(trades_summary.get("trades_count", 0))
+    symbols_count = int(trades_summary.get("symbols_count", 0))
+    verification_sql = trades_summary.get("evidence", {}).get("verification_sql", {})
+
+    if trades_count == 0:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "status": "precondition_failed",
+                "user_id": user_id,
+                "message": "trades_count=0;請先執行 sync",
+                "evidence": {
+                    "trades_count": trades_count,
+                    "distinct_symbols_count": symbols_count,
+                    "verification_sql": verification_sql,
+                },
+            },
+        )
+
+    positions_payload = await client.get_positions(user_id)
+    positions_items = positions_payload
+    positions_items = sorted(
+        positions_items,
+        key=lambda item: (item.get("symbol", ""), item.get("asset_ccy", "")),
     )
 
+    price_provider = PriceProvider()
+    fx_provider = FxProvider()
 
-@app.get("/valuation/snapshots")
-async def get_snapshots(user_id: str, asof_date: Optional[date] = None):
-    """取得估值快照（骨架版）
-    
-    未來：從 valuation_snapshots 表查詢估值結果
-    目前：從 portfolio-service 取得帳務數據（示範 API-only 取數）
-    """
-    client = PortfolioClient()
-    
-    try:
-        positions = await client.get_positions(user_id)
-    except Exception as e:
-        raise HTTPException(
-            status_code=502,
-            detail=f"Failed to fetch positions: {str(e)}"
+    items: list[ValuationItem] = []
+    for pos in positions_items:
+        symbol = pos.get("symbol", "")
+        asset_ccy = pos.get("asset_ccy", "")
+        qty = _to_decimal(pos.get("quantity", 0))
+        avg_cost = _to_decimal(pos.get("avg_cost", 0))
+
+        price, price_ccy, source = price_provider.get_price(symbol, as_of)
+        rate = fx_provider.get_rate(price_ccy, base_ccy, as_of)
+
+        market_value = (qty * price * rate)
+        unrealized = (price - avg_cost) * qty * rate
+
+        items.append(
+            ValuationItem(
+                symbol=symbol,
+                asset_ccy=asset_ccy,
+                quantity=float(qty),
+                avg_cost=float(avg_cost),
+                price=float(price),
+                price_ccy=price_ccy,
+                base_ccy=base_ccy,
+                fx_rate_to_base=float(rate),
+                market_value=float(market_value),
+                unrealized_pnl=float(unrealized),
+            )
         )
-    
-    # 骨架版：直接回傳帳務數據
-    snapshots = [
-        ValuationSnapshot(
-            user_id=user_id,
-            symbol=pos.get("symbol", ""),
-            asset_ccy=pos.get("asset_ccy", ""),
-            quantity=pos.get("quantity", 0.0),
-            avg_cost=pos.get("avg_cost", 0.0)
-        )
-        for pos in positions
-    ]
-    
-    return {
-        "user_id": user_id,
-        "asof_date": asof_date,
-        "snapshots": snapshots,
-        "message": "骨架版：回傳帳務數據（未來將實作估值邏輯）"
+
+    evidence = {
+        "positions_count": len(positions_items),
+        "positions_hash": _canonical_json_hash(positions_items),
+        "trades_count": trades_count,
+        "distinct_symbols_count": symbols_count,
+        "verification_sql": verification_sql,
+        "providers": {
+            "price_provider": price_provider.provider_name(),
+            "fx_provider": fx_provider.provider_name(),
+            "price_source": price_provider.source(),
+            "as_of": as_of.isoformat(),
+        },
     }
+
+    return ValuationResponse(
+        status="succeeded",
+        user_id=user_id,
+        base_ccy=base_ccy,
+        as_of=as_of,
+        items=items,
+        evidence=_mask_env_keys_in_evidence(evidence),
+    )

@@ -44,23 +44,16 @@ class PortfolioClient:
             # 實際端點需要與 portfolio-service 協調
             url = f"{self.base_url}/portfolio/positions"
             
-            try:
-                response = await client.get(
-                    url,
-                    params={"user_id": user_id}
-                )
-                response.raise_for_status()
-                
-                data = response.json()
-                
-                # 回傳格式：[{symbol, asset_ccy, quantity, avg_cost, ...}]
-                return data.get("positions", [])
-            
-            except httpx.HTTPError as e:
-                # 骨架版：如果端點不存在，回傳空列表
-                # 未來應該拋出異常
-                print(f"Warning: Failed to fetch positions: {e}")
-                return []
+            response = await client.get(
+                url,
+                params={"user_id": user_id}
+            )
+            response.raise_for_status()
+
+            data = response.json()
+
+            # 回傳格式：{items: [...]}
+            return data.get("items", data.get("positions", []))
     
     async def get_trades_summary(self, user_id: str) -> Dict[str, Any]:
         """取得交易記錄摘要（前置條件檢查）
