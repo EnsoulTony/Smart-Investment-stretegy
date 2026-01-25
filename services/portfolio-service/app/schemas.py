@@ -148,13 +148,12 @@ class RebuildPositionsResponse(BaseModel):
     affected_count: int = Field(..., ge=0, description="受影響的標的數量")
 
 
-class PositionSnapshot(BaseModel):
-    """持倉快照（帳務層專用，不含估值）。
+class PositionItem(BaseModel):
+    """持倉查詢項目（帳務層只讀）。
     
-    嚴格限制：
-    - 只包含帳務欄位（symbol, asset_ccy, quantity, avg_cost, realized_pnl, cost_basis）
-    - 不得包含估值欄位（market_value, unrealized_pnl, valuation_ccy, fx_rate）
-    - cost_basis = quantity * avg_cost（會計成本基礎）
+    限制：
+    - 僅包含帳務欄位（symbol, asset_ccy, quantity, avg_cost, realized_pnl, cost_basis）
+    - cost_basis = quantity * avg_cost
     """
     symbol: str = Field(..., description="股票代碼")
     asset_ccy: str = Field(..., description="資產幣別（原始交易幣別）")
@@ -167,11 +166,8 @@ class PositionSnapshot(BaseModel):
 
 
 class PositionsResponse(BaseModel):
-    """持倉查詢回應。
-    
-    帳務層只讀 API，不做估值計算。
-    """
+    """持倉查詢回應（帳務層只讀 API）。"""
     user_id: str
-    items: List[PositionSnapshot]
-    total_count: int
-    cursor: Optional[str] = None  # 分頁游標（未來實作）
+    asof: Optional[str] = None
+    items: List[PositionItem]
+    next_cursor: Optional[str] = None

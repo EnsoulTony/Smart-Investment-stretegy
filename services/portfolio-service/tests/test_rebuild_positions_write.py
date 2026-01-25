@@ -4,7 +4,7 @@
 1. rebuild_positions 能正確寫入 positions 表
 2. 冪等性：重複執行結果一致
 3. 無 trades 時正確處理
-4. 欄位正確性：asset_ccy、unrealized_pnl=0
+4. 欄位正確性：asset_ccy、u_pnl=0
 5. 不呼叫 FX 模組（帳務層硬禁止）
 """
 
@@ -88,7 +88,7 @@ def test_rebuild_positions_writes_to_database(client, db_session: Session):
     assert position is not None, "positions 表應該有 AAPL 的記錄"
     assert position.asset_ccy == "USD", "asset_ccy 應該來自 trade"
     assert position.quantity == Decimal("15"), "數量應該是 10 + 5 = 15"
-    assert position.unrealized_pnl == Decimal("0"), "unrealized_pnl 應該填 0（不做估值）"
+    assert position.u_pnl == Decimal("0"), "u_pnl 應該填 0（不做估值）"
 
 
 def test_rebuild_positions_idempotency(client, db_session: Session):

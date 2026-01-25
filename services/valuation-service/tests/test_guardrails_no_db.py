@@ -98,6 +98,34 @@ def test_codebase_no_db_connection_strings():
 
 
 # ============================================================================
+# 🚫 Guardrail 5: 禁止 DB 直連關鍵字（統一掃描）
+# ============================================================================
+
+def test_codebase_no_db_keywords():
+    """掃描 app/*.py，禁止 DB 直連關鍵字
+
+    違規關鍵字：sqlalchemy | psycopg2 | postgresql://
+    """
+    app_dir = Path(__file__).parent.parent / "app"
+
+    violations = []
+    tokens = ["sqlalchemy", "psycopg2", "postgresql://"]
+
+    for py_file in app_dir.rglob("*.py"):
+        with open(py_file, 'r') as f:
+            content = f.read().lower()
+
+        for token in tokens:
+            if token in content:
+                violations.append(f"{py_file.name}: {token}")
+
+    assert not violations, (
+        "❌ 違反架構鐵律：valuation-service 禁止 DB 直連關鍵字！\n"
+        + "\n".join(f"  - {v}" for v in violations)
+    )
+
+
+# ============================================================================
 # 🚫 Guardrail 3: 禁止 codebase 出現 SQLAlchemy Session/Engine
 # ============================================================================
 

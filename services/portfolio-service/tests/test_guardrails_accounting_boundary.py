@@ -281,7 +281,7 @@ def test_positions_api_no_valuation_logic():
 
 
 def test_positions_api_response_schema():
-    """確認 PositionSnapshot schema 只有帳務欄位
+    """確認 PositionItem schema 只有帳務欄位
     
     允許：symbol, asset_ccy, quantity, avg_cost, realized_pnl, cost_basis
     禁止：market_value, unrealized_pnl, fx_rate, valuation_ccy
@@ -294,15 +294,15 @@ def test_positions_api_response_schema():
     with open(schemas_path, 'r') as f:
         content = f.read()
     
-    # 找到 PositionSnapshot class
+    # 找到 PositionItem class
     snapshot_class = re.search(
-        r'class PositionSnapshot.*?(?=\nclass |\Z)',
+        r'class PositionItem.*?(?=\nclass |\Z)',
         content,
         re.DOTALL
     )
     
     if not snapshot_class:
-        pytest.skip("PositionSnapshot class not found")
+        pytest.skip("PositionItem class not found")
     
     snapshot_code = snapshot_class.group()
     
@@ -315,9 +315,9 @@ def test_positions_api_response_schema():
             violations.append(f"PositionSnapshot has forbidden field: {field}")
     
     assert not violations, (
-        f"❌ 違反 Sprint 1-4.B 鐵律：PositionSnapshot 不應有估值欄位！\n"
+        f"❌ 違反 Sprint 1-4.B 鐵律：PositionItem 不應有估值欄位！\n"
         f"發現違規：\n" + "\n".join(f"  - {v}" for v in violations) + "\n"
         f"帳務層 response schema 只包含：\n"
         f"  symbol, asset_ccy, quantity, avg_cost, realized_pnl, cost_basis\n"
-        f"估值欄位應在 valuation-service 的 ValuationSnapshot。"
+        f"估值欄位應在估值服務的專屬 schema。"
     )

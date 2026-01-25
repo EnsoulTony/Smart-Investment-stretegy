@@ -61,7 +61,7 @@ class PositionRebuilder:
            - avg_cost: 平均成本
            - realized_pnl: 已實現損益
         4. 寫入 positions 表（使用 merge 實現冪等性）
-        5. unrealized_pnl 固定填 0（不做估值）
+        5. u_pnl 固定填 0（不做估值）
         6. 不做 FX 匯率折算（帳務層硬禁止）
         
         Args:
@@ -80,7 +80,7 @@ class PositionRebuilder:
         Notes:
             - 使用 session.merge() 實現冪等性（重複執行結果一致）
             - 不呼叫 FX 模組（帳務層規範）
-            - unrealized_pnl 填 0（不做估值）
+            - u_pnl 填 0（不做估值）
         """
         if not user_id or not user_id.strip():
             raise ValueError("user_id 不可為空")
@@ -110,7 +110,7 @@ class PositionRebuilder:
                     quantity=Decimal(str(pos_data["qty"])),
                     avg_cost=Decimal(str(pos_data["avg_cost"])),
                     realized_pnl=Decimal(str(pos_data["realized_pnl"])),
-                    unrealized_pnl=Decimal("0")  # Sprint 1-4.3: 不做估值，填 0
+                    u_pnl=Decimal("0")  # Sprint 1-4.3: 不做估值，填 0
                 )
                 
                 # 使用 merge 實現冪等性（基於 user_id + symbol unique constraint）

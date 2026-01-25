@@ -56,7 +56,7 @@ class Position(Base):
     quantity = Column(Numeric, nullable=False)
     avg_cost = Column(Numeric, nullable=False)
     realized_pnl = Column(Numeric, nullable=False, default=0)
-    unrealized_pnl = Column(Numeric, nullable=False, default=0)
+    u_pnl = Column(Numeric, nullable=False, default=0)
     last_updated_at = Column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc))
     
     __table_args__ = (

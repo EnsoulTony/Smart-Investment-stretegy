@@ -114,6 +114,12 @@ def test_trade_source_hash_unique_constraint(db_session):
 
 def test_position_user_symbol_unique_constraint(db_session):
     """測試 positions 表的 (user_id, symbol) 唯一性約束。"""
+    # 確保 u_pnl 欄位存在（避免環境遺留 schema 差異）
+    db_session.execute(text(
+        "ALTER TABLE positions ADD COLUMN IF NOT EXISTS u_pnl NUMERIC NOT NULL DEFAULT 0"
+    ))
+    db_session.commit()
+
     # 第一筆成功
     position1 = Position(
         user_id="test_user",
@@ -122,7 +128,7 @@ def test_position_user_symbol_unique_constraint(db_session):
         quantity=100,
         avg_cost=390.00,
         realized_pnl=0,
-        unrealized_pnl=500
+        u_pnl=500
     )
     db_session.add(position1)
     db_session.commit()
@@ -135,7 +141,7 @@ def test_position_user_symbol_unique_constraint(db_session):
         quantity=150,
         avg_cost=395.00,
         realized_pnl=0,
-        unrealized_pnl=750
+        u_pnl=750
     )
     db_session.add(position2)
     

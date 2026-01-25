@@ -36,7 +36,7 @@ def test_get_positions_success():
         quantity=Decimal("100"),
         avg_cost=Decimal("250.00"),
         realized_pnl=Decimal("1500.00"),
-        unrealized_pnl=Decimal("0")  # 帳務層固定為 0
+        u_pnl=Decimal("0")
     )
     pos2 = Position(
         user_id="tony",
@@ -45,7 +45,7 @@ def test_get_positions_success():
         quantity=Decimal("50"),
         avg_cost=Decimal("500.00"),
         realized_pnl=Decimal("3000.00"),
-        unrealized_pnl=Decimal("0")
+        u_pnl=Decimal("0")
     )
     db.add_all([pos1, pos2])
     db.commit()
@@ -59,8 +59,8 @@ def test_get_positions_success():
     data = response.json()
     
     assert data["user_id"] == "tony"
-    assert data["total_count"] == 2
     assert len(data["items"]) == 2
+    assert data["next_cursor"] is None
     
     # 驗證第一筆持倉
     item1 = data["items"][0]
@@ -95,8 +95,8 @@ def test_get_positions_no_data():
     data = response.json()
     
     assert data["user_id"] == "nonexistent"
-    assert data["total_count"] == 0
     assert data["items"] == []
+    assert data["next_cursor"] is None
 
 
 def test_get_positions_limit():
@@ -112,7 +112,7 @@ def test_get_positions_limit():
             quantity=Decimal("10"),
             avg_cost=Decimal("100"),
             realized_pnl=Decimal("0"),
-            unrealized_pnl=Decimal("0")
+            u_pnl=Decimal("0")
         )
         db.add(pos)
     
@@ -125,5 +125,5 @@ def test_get_positions_limit():
     assert response.status_code == 200
     data = response.json()
     
-    assert data["total_count"] == 2  # 只回傳 2 筆
     assert len(data["items"]) == 2
+    assert data["next_cursor"] is None
