@@ -12,15 +12,18 @@ client = TestClient(app)
 def test_health_check():
     """測試 /health 端點"""
     response = client.get("/health")
-    
+
     assert response.status_code == 200
-    
+
     data = response.json()
     assert data["status"] == "healthy"
     assert data["service_name"] == "valuation-service"
     assert "portfolio_base_url" in data
     assert "providers" in data
-    assert "runtime_guard_status" in data
+    # Sprint 1-4.B: guardrail 改為結構化輸出
+    assert "guardrail" in data
+    assert data["guardrail"]["id"] == "VAL-SVC-NO-DB"
+    assert data["guardrail"]["status"] == "ok"
 
 
 def test_health_check_exposes_portfolio_base_url():

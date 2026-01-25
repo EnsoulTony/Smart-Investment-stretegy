@@ -19,10 +19,21 @@ depends_on = None
 
 def upgrade() -> None:
     # 修正 schema drift：補上 positions.u_pnl（避免 production 500）
-    op.add_column(
-        'positions',
-        sa.Column('u_pnl', sa.Numeric(18, 6), nullable=True)
-    )
+    # 使用 batch_alter_table 檢查欄位是否已存在
+    from sqlalchemy import inspect
+    
+    conn = op.get_bind()
+    inspector = inspect(conn)
+    columns = [col['name'] for col in inspector.get_columns('positions')]
+    
+    if 'u_pnl' not in columns:
+        op.add_column(
+            'positions',
+            sa.Column('u_pnl', sa.Numeric(18, 6), nullable=True)
+        )
+    else:
+        # 欄位已存在，跳過（冪等性）
+        pass
 
 
 def downgrade() -> None:

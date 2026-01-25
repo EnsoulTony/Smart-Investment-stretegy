@@ -1069,6 +1069,171 @@ docker compose exec postgres psql -U investment -d investment_db -c   "SELECT co
 
 ---
 
+## Sprint 1-4.B：估值層完整實作（已完成）
+
+### 交付物總覽
+
+| 檔案 | 說明 |
+|------|------|
+| `services/valuation-service/app/main.py` | 估值 API（含 totals + positions + evidence） |
+| `services/valuation-service/app/providers.py` | 抽象介面 + Stub 實作（可替換） |
+| `services/valuation-service/app/guardrails.py` | Runtime guard（禁止 DB env 注入） |
+| `services/valuation-service/app/portfolio_client.py` | HTTP client（取代 DB 直連） |
+| `services/valuation-service/tests/test_valuation_portfolio.py` | API 測試（409/200/JSON 格式） |
+| `services/valuation-service/tests/test_runtime_guard_no_db_env.py` | Runtime guard 測試 |
+| `tools/pr_check.sh` | PR 自動檢查腳本（12 項檢查） |
+
+### 最短跑通流程
+
+```bash
+# 1. 確保服務啟動
+docker compose up -d portfolio-service valuation-service
+
+# 2. 同步交易資料（如果需要）
+./tools/portfolio_refresh.sh tony
+
+# 3. 呼叫估值 API
+curl -s "http://localhost:8005/valuation/portfolio?user_id=tony&base_ccy=USD" | python3 -m json.tool
+```
+
+### API 回應結構（Sprint 1-4.B）
+
+**成功回應（HTTP 200）**：
+```json
+{
+  "status": "succeeded",
+  "user_id": "tony",
+  "base_ccy": "USD",
+  "as_of": "2026-01-25",
+  "totals": {
+    "market_value": 1500.0,
+    "cost_value": 1000.0,
+    "unrealized_pnl": 500.0
+  },
+  "positions": [
+    {
+      "symbol": "AAPL",
+      "asset_ccy": "USD",
+      "quantity": 10.0,
+      "avg_cost": 100.0,
+      "cost_value": 1000.0,
+      "price": 150.0,
+      "price_ccy": "USD",
+      "market_value": 1500.0,
+      "unrealized_pnl": 500.0
+    }
+  ],
+  "evidence": {
+    "decision": "proceed",
+    "precondition_snapshot": {
+      "trades_count": 2,
+      "distinct_symbols_count": 1
+    },
+    "verification": {
+      "portfolio_service_endpoints_called": [
+        "GET /portfolio/trades/summary?user_id=tony",
+        "GET /portfolio/positions?user_id=tony"
+      ],
+      "trades_summary_sql": {...},
+      "as_of": "2026-01-25"
+    },
+    "providers": {
+      "price_provider": "stub",
+      "price_provider_version": "1.4.B",
+      "fx_provider": "stub",
+      "fx_provider_version": "1.4.B"
+    },
+    "positions_count": 1,
+    "positions_hash": "<sha256>",
+    "masked_env_keys": ["HOME=***", "PATH=***", ...]
+  }
+}
+```
+
+**前置條件失敗（HTTP 409）**：
+```json
+{
+  "detail": {
+    "status": "precondition_failed",
+    "user_id": "empty_user",
+    "message": "trades_count=0;請先執行 sync",
+    "evidence": {
+      "decision": "blocked_precondition",
+      "trades_count": 0,
+      "distinct_symbols_count": 0,
+      "verification_sql": {...},
+      "portfolio_service_endpoints_called": [...],
+      "masked_env_keys": [...]
+    }
+  }
+}
+```
+
+### 驗收命令（可證偽）
+
+```bash
+# 1. 健康檢查
+curl -s http://localhost:8005/health | python3 -m json.tool
+
+# 2. 估值 API（成功案例）
+curl -s "http://localhost:8005/valuation/portfolio?user_id=tony&base_ccy=USD" | python3 -m json.tool
+
+# 3. 估值 API（失敗案例 - 409）
+curl -s -w "\nHTTP_CODE=%{http_code}\n" "http://localhost:8005/valuation/portfolio?user_id=empty_user"
+
+# 4. 測試套件
+docker compose exec -T valuation-service pytest -q
+
+# 5. Runtime guard 注入測試
+docker compose run --rm -e DATABASE_URL=x valuation-service python -c "from app.guardrails import check_and_exit; check_and_exit()"
+# 預期：non-zero exit，輸出不含 DATABASE_URL 的 value
+
+# 6. PR 自動檢查（一鍵）
+./tools/pr_check.sh
+```
+
+### PR 自動檢查清單
+
+執行 `./tools/pr_check.sh` 會依序檢查：
+
+| # | 檢查項目 | rule_id |
+|---|---------|---------|
+| 1 | valuation-service forbidden tokens | VAL-FT-1 |
+| 2 | portfolio-service accounting forbidden tokens | PORT-FT-1 |
+| 3 | valuation-service env allow-list | COMPOSE-VAL-ALLOWLIST |
+| 4 | portfolio-service env checks | COMPOSE-PORT-* |
+| 5 | Services running | PRECHECK-SVC-RUNNING |
+| 6 | Runtime env sanity | RUNTIME-VAL-DBENV |
+| 7 | Runtime guard injection test | RUNTIME-GUARD-* |
+| 8 | API JSON contract | API-JSON-* |
+| 9-12 | pytest (portfolio/valuation) | - |
+
+**失敗訊息解讀**：
+- `VAL-FT-*`：valuation-service 出現禁止的 DB token
+- `PORT-FT-*`：portfolio-service 帳務層出現禁止的估值 token
+- `COMPOSE-VAL-*`：valuation-service env 配置違規
+- `COMPOSE-PORT-*`：portfolio-service env/secret 違規
+- `RUNTIME-*`：運行時 guardrail 違規
+- `API-JSON-*`：API 回應不是有效 JSON
+- `PRECHECK-*`：前置條件不足
+
+### 為何能避免 VM 才爆
+
+1. **docker compose config 是展開後真相來源**
+   - 本機 `.env` 可能包含所有變數，但 `docker-compose.yml` 選擇性注入
+   - `docker compose config` 顯示的是 VM 實際收到的配置
+   - pr_check.sh 會驗證 valuation-service 只收到 allow-list 內的 env
+
+2. **Runtime guard 在啟動時檢查**
+   - 即使 compose config 正確，若有人手動注入 DB env，guardrails 會阻斷
+   - evidence 只顯示遮罩後的 key，不洩漏 value
+
+3. **API JSON 合約檢查**
+   - 使用 `python3 -c "import json; json.loads(...)"` 而非 jq
+   - 能抓到回傳 dict repr / traceback / HTML 的情況
+
+---
+
 ## 注意事項
 
 - 所有程式碼與文件須維持繁體中文描述。
