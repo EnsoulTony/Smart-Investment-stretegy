@@ -169,3 +169,26 @@ class PositionsResponse(BaseModel):
     asof: Optional[str] = None
     items: List[PositionItem]
     next_cursor: Optional[str] = None
+
+
+class TradesSummaryResponse(BaseModel):
+    """交易記錄摘要回應（輕量級探針端點）。
+    
+    用途：
+    - 提供輕量級探針端點，讓其他服務或腳本先確認前置條件
+    - 不回傳完整交易記錄，只回傳統計資訊
+    - 可證偽：提供 verification_sql 讓使用者驗證
+    
+    使用場景：
+    - automation 腳本在呼叫 rebuild_positions 前先確認是否有交易記錄
+    - valuation-service 確認 portfolio-service 的資料範圍
+    - 診斷工具（確認 sync 是否成功）
+    """
+    user_id: str = Field(..., description="使用者 ID")
+    trades_count: int = Field(..., ge=0, description="交易記錄總筆數")
+    symbols_count: int = Field(..., ge=0, description="不重複標的數量")
+    min_trade_date: Optional[str] = Field(None, description="最早交易日期（YYYY-MM-DD）")
+    max_trade_date: Optional[str] = Field(None, description="最晚交易日期（YYYY-MM-DD）")
+    evidence: dict = Field(..., description="可證偽證據（包含 verification_sql）")
+    
+    model_config = ConfigDict(from_attributes=True)

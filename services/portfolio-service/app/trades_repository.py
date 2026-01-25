@@ -68,3 +68,54 @@ def list_trades_for_user(db: Session, user_id: str) -> List[Trade]:
     logger.info("查詢完成，user_id=%s, trades_count=%d", user_id, len(trades))
     
     return trades
+
+
+def count_trades_for_user(db: Session, user_id: str) -> int:
+    """計算指定用戶的交易記錄筆數。
+    
+    用途：
+    - 前置條件檢查（rebuild_positions 需要確認是否有交易記錄）
+    - 輕量級探針端點（不需回傳完整 Trade 物件）
+    - 診斷工具（確認 sync 是否成功）
+    
+    Args:
+        db: SQLAlchemy Session
+        user_id: 使用者 ID
+    
+    Returns:
+        int: 交易記錄筆數（若無交易記錄則回傳 0）
+    
+    Example:
+        >>> count_trades_for_user(session, "tony")
+        66
+    """
+    count = db.query(Trade).filter(Trade.user_id == user_id).count()
+    logger.debug("trades_count=%d, user_id=%s", count, user_id)
+    return count
+
+
+def count_distinct_symbols_for_user(db: Session, user_id: str) -> int:
+    """計算指定用戶交易過的不重複標的數量。
+    
+    用途：
+    - 評估 rebuild 工作量（多少個標的需要重算）
+    - 診斷工具（確認資料範圍）
+    - Evidence 可證偽欄位
+    
+    Args:
+        db: SQLAlchemy Session
+        user_id: 使用者 ID
+    
+    Returns:
+        int: 不重複標的數量（若無交易記錄則回傳 0）
+    
+    Example:
+        >>> count_distinct_symbols_for_user(session, "tony")
+        5  # AAPL, TSLA, GOOGL, MSFT, NVDA
+    """
+    from sqlalchemy import func
+    count = db.query(func.count(func.distinct(Trade.symbol))).filter(
+        Trade.user_id == user_id
+    ).scalar()
+    logger.debug("distinct_symbols_count=%d, user_id=%s", count or 0, user_id)
+    return count or 0

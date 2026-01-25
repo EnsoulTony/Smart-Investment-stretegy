@@ -585,6 +585,110 @@ docker compose exec -T portfolio-service pytest -q -k fx --collect-only
 - ✅ 零持倉刪除：賣完後自動清理 positions 表
 - ✅ 測試覆蓋：買入、賣出、賣光、冪等性、空用戶
 
+---
+
+### Sprint: Prevent "Empty Rebuild"（前置條件檢查，已完成）
+
+**背景**（Why）：
+在 VM / 新環境常見「rebuild_positions 成功但 symbols_count=0（其實是 trades 尚未 sync）」的問題，使用者誤判「rebuild 成功」但其實沒有實質效果。
+
+**目標**（What）：
+把前置條件變成系統合約，而不是操作習慣。前置條件不足就要「可證偽地」失敗，不准靜默成功。
+
+**解決方案**：
+1. **新增 `require_trades` 參數**：
+   - `POST /portfolio/rebuild_positions?require_trades=true`
+   - 當 trades_count=0 時回傳 **409 Conflict**（而非靜默成功）
+   - 回傳包含可證偽的 `evidence.verification_sql`
+
+2. **新增輕量探針端點**：
+   - `GET /portfolio/trades/summary?user_id=...`
+   - 回傳 `trades_count`, `symbols_count`, `min_trade_date`, `max_trade_date`
+   - 讓 automation 腳本先確認前置條件
+
+**技術決策**：
+- ✅ `require_trades` 預設 `false`（保持向後相容）
+- ✅ 前置條件失敗回傳 409 Conflict（而非 422 或 500）
+- ✅ Evidence 包含 SQL 語句供人工驗證（可證偽）
+- 🚫 rebuild_positions 不得在內部偷偷呼叫 sync（避免副作用）
+- 🚫 valuation-service 禁止 DB 直連（microservices 邊界）
+
+**交付物**：
+- ✅ `trades_repository.py`：`count_trades_for_user()`, `count_distinct_symbols_for_user()`
+- ✅ `schemas.py`：`TradesSummaryResponse`
+- ✅ `main.py`：`GET /portfolio/trades/summary`, `rebuild_positions` 增加 `require_trades` 參數
+- ✅ `test_trades_summary_and_require_trades.py`：6 個測試用例，全部通過
+
+**驗收證據**：
+
+#### 1. 測試套件通過
+
+```bash
+docker compose exec -T portfolio-service \
+  pytest tests/test_trades_summary_and_require_trades.py -v
+# 期望：6 passed
+# - test_trades_summary_empty_returns_zero
+# - test_trades_summary_after_insert_returns_counts
+# - test_rebuild_positions_require_trades_blocks_when_empty（409 Conflict）
+# - test_rebuild_positions_require_trades_proceeds_when_has_trades
+# - test_rebuild_positions_default_require_trades_false_allows_empty
+# - test_evidence_verification_sql_contains_all_required_fields
+```
+
+#### 2. API 行為驗證
+
+```bash
+# 情境 A：trades 為空 + require_trades=true（應被擋）
+curl -s -X POST "http://localhost:8001/portfolio/rebuild_positions?user_id=empty_user&require_trades=1"
+# HTTP 409, detail.status="precondition_failed", evidence.trades_count=0
+
+# 情境 B：trades 為空 + require_trades=false（靜默成功，保持相容）
+curl -s -X POST "http://localhost:8001/portfolio/rebuild_positions?user_id=empty_user&require_trades=0" | jq .status
+# "succeeded"（symbols_count=0）
+
+# 情境 C：trades/summary 輕量探針
+curl -s "http://localhost:8001/portfolio/trades/summary?user_id=tony" | jq
+# 回傳 trades_count, symbols_count, min_trade_date, max_trade_date, evidence
+```
+
+#### 3. Evidence 可證偽性
+
+```bash
+# 取得 verification_sql
+curl -s "http://localhost:8001/portfolio/trades/summary?user_id=tony" | jq .evidence.verification_sql
+
+# 手動執行 SQL 驗證
+docker compose exec -T postgres psql -U investment -d investment_db -c \
+"select count(*) from trades where user_id='tony';"
+# 數量應與 API 回傳的 trades_count 一致
+
+docker compose exec -T postgres psql -U investment -d investment_db -c \
+"select count(distinct symbol) from trades where user_id='tony';"
+# 數量應與 API 回傳的 symbols_count 一致
+```
+
+**禁止事項**（Hard Boundaries）：
+- 🚫 rebuild_positions 不得在內部偷偷呼叫 sync（避免副作用、隱性耗時）
+- 🚫 require_trades 預設不得為 true（向後相容）
+- 🚫 valuation-service 禁止 DB 直連（已有 guardrails 測試確保）
+
+**故障排除**：
+1. **require_trades=1 但還是回 succeeded（應該回 409）**：
+   - 檢查 trades 是否真的為空：`select count(*) from trades where user_id='...'`
+   - 檢查 `count_trades_for_user()` 是否被正確呼叫
+
+2. **trades/summary 回傳 404**：
+   - 檢查容器是否重建：`docker compose up -d --build portfolio-service`
+   - 檢查啟動日誌：`docker compose logs -f portfolio-service`
+
+3. **evidence.verification_sql 缺失**：
+   - 檢查 [schemas.py](services/portfolio-service/app/schemas.py) 的 `TradesSummaryResponse`
+   - 檢查端點回傳 dict 是否包含 `evidence` 和 `verification_sql`
+
+---
+
+### Sprint 1-4.3 原始驗收證據（Positions 寫回）
+
 **驗收證據**（Acceptance Evidence）：
 
 #### 1. 測試套件通過

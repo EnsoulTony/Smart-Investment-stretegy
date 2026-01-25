@@ -7,13 +7,15 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI, Depends, HTTPException, Query, Body
 from sqlalchemy.orm import Session
 from sqlalchemy import inspect
-from .schemas import RebuildPositionsRequest, RebuildPositionsResponse, PositionsResponse
+from .schemas import RebuildPositionsRequest, RebuildPositionsResponse, PositionsResponse, TradesSummaryResponse
 
 from app.db import get_db, engine
 from app.sync_service import SyncService
 from app.position_rebuilder import PositionRebuilder, preview_rebuild
 from app.schemas import RebuildPositionsRequest, RebuildPositionsResponse
 from app.repositories.positions_repository import list_positions_for_user
+from app.trades_repository import count_trades_for_user, count_distinct_symbols_for_user
+from app.models import Trade
 
 SERVICE_NAME = os.getenv("SERVICE_NAME", "portfolio-service")
 
@@ -112,40 +114,114 @@ def sync_trades(db: Session = Depends(get_db)) -> dict:
         )
 
 
+@app.get("/portfolio/trades/summary", tags=["portfolio"], response_model=TradesSummaryResponse)
+def get_trades_summary(
+    user_id: str = Query(..., description="使用者 ID"),
+    db: Session = Depends(get_db)
+) -> dict:
+    """取得指定用戶的交易記錄摘要（輕量級探針端點）。
+    
+    用途：
+    - 提供輕量級探針端點，讓其他服務或腳本先確認前置條件
+    - automation 腳本在呼叫 rebuild_positions 前先確認是否有交易記錄
+    - 診斷工具（確認 sync 是否成功）
+    
+    回傳：
+    - trades_count: 交易記錄總筆數
+    - symbols_count: 不重複標的數量
+    - min_trade_date / max_trade_date: 交易日期範圍（可選）
+    - evidence: 可證偽證據（包含 verification_sql）
+    
+    Args:
+        user_id: 使用者 ID（Query 參數）
+        db: SQLAlchemy Session（依賴注入）
+    
+    Returns:
+        TradesSummaryResponse: 交易摘要
+    
+    Raises:
+        HTTPException:
+            - 422: user_id 缺失或格式錯誤
+    """
+    if not user_id or not user_id.strip():
+        raise HTTPException(status_code=422, detail="user_id must not be empty")
+    
+    trades_count = count_trades_for_user(db, user_id)
+    symbols_count = count_distinct_symbols_for_user(db, user_id)
+    
+    # 查詢日期範圍（可選）
+    min_date = None
+    max_date = None
+    if trades_count > 0:
+        from sqlalchemy import func
+        date_range = db.query(
+            func.min(Trade.trade_date),
+            func.max(Trade.trade_date)
+        ).filter(Trade.user_id == user_id).first()
+        
+        if date_range and date_range[0] and date_range[1]:
+            min_date = date_range[0].strftime("%Y-%m-%d")
+            max_date = date_range[1].strftime("%Y-%m-%d")
+    
+    evidence = {
+        "verification_sql": {
+            "trades_count": f"select count(*) from trades where user_id='{user_id}';",
+            "distinct_symbols": f"select count(distinct symbol) from trades where user_id='{user_id}';"
+        }
+    }
+    
+    return {
+        "user_id": user_id,
+        "trades_count": trades_count,
+        "symbols_count": symbols_count,
+        "min_trade_date": min_date,
+        "max_trade_date": max_date,
+        "evidence": evidence
+    }
+
+
 @app.post("/portfolio/rebuild_positions", tags=["portfolio"], response_model=RebuildPositionsResponse)
 def rebuild_positions(
     request: dict | None = Body(None),
     user_id: Optional[str] = Query(None),
+    require_trades: bool = Query(False, description="是否強制要求 trades 表有資料（預設 false 保持相容）"),
     db: Session = Depends(get_db)
 ) -> dict:
     """重算指定用戶的持倉狀態。
     
     從 trades 表重新計算當前持倉數量、平均成本與已實現損益。
     
-    流程（當前階段僅骨架）：
-    1. 讀取該用戶的所有交易記錄
-    2. 按 symbol 分組並依序計算（下階段實作均價法）
-    3. 寫入 positions_snapshot 表（下階段實作）
+    前置條件檢查（require_trades=true 時）：
+    - 若該用戶在 trades 表的筆數為 0，回傳 409 Conflict
+    - 這是「讓錯誤早炸」的設計，避免使用者誤判「rebuild 成功」
+    
+    流程：
+    1. 檢查前置條件（若 require_trades=true）
+    2. 讀取該用戶的所有交易記錄
+    3. 按 symbol 分組並依序計算均價法
+    4. 寫入 positions 表（UPSERT）
     
     Args:
-        request: 包含 user_id 的請求 body
+        request: 包含 user_id 的請求 body（可選）
+        user_id: 使用者 ID（Query 參數，優先於 body）
+        require_trades: 是否強制要求 trades 表有資料（預設 false）
         db: SQLAlchemy Session（依賴注入）
     
     Returns:
         dict: 重算結果
-            - status: 執行狀態（"succeeded" 或 "failed"）
-            - rebuilt_symbols_count: 重算的標的數量
-            - warnings: 警告訊息列表
+            - status: 執行狀態（"succeeded" / "failed" / "precondition_failed"）
+            - symbols_count: 重算的標的數量
+            - evidence: 可證偽證據（包含 verification_sql）
     
     Raises:
         HTTPException:
-            - 422: user_id 缺失或格式錯誤（Pydantic 自動驗證）
+            - 409: require_trades=true 且 trades_count=0（前置條件不滿足）
+            - 422: user_id 缺失或格式錯誤
             - 500: 重算過程發生錯誤
     
     Notes:
-        - TODO: 加入身份驗證（JWT/API Key）
-        - 當前階段（Sprint 1-4.0）僅回傳固定結構
-        - 下階段（Sprint 1-4.1）將實作均價法計算邏輯
+        - require_trades 預設 false 保持既有行為相容
+        - 前置條件失敗會回傳 409 Conflict + 可證偽 evidence
     """
     try:
         if user_id is None:
@@ -158,8 +234,49 @@ def rebuild_positions(
         if not user_id or not user_id.strip():
             raise HTTPException(status_code=422, detail="user_id must not be empty")
 
+        # 前置條件檢查：若 require_trades=true 且 trades_count=0，回傳 409
+        trades_count = count_trades_for_user(db, user_id)
+        distinct_symbols_count = count_distinct_symbols_for_user(db, user_id)
+        
+        if require_trades and trades_count == 0:
+            evidence = {
+                "require_trades": True,
+                "decision": "blocked_precondition",
+                "trades_count": trades_count,
+                "distinct_symbols_count": distinct_symbols_count,
+                "verification_sql": {
+                    "trades_count": f"select count(*) from trades where user_id='{user_id}';",
+                    "distinct_symbols": f"select count(distinct symbol) from trades where user_id='{user_id}';"
+                }
+            }
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "status": "precondition_failed",
+                    "user_id": user_id,
+                    "symbols_count": 0,
+                    "upserted_count": 0,
+                    "deleted_or_zeroed_count": 0,
+                    "run_id": "",
+                    "evidence": evidence,
+                    "message": "前置條件不滿足：該用戶在 trades 表無交易記錄，無法執行 rebuild_positions（require_trades=true）"
+                }
+            )
+
         rebuilder = PositionRebuilder(session=db)
         result = rebuilder.rebuild_positions(user_id=user_id)
+        
+        # 補充可證偽 evidence
+        result["evidence"]["require_trades"] = require_trades
+        result["evidence"]["decision"] = "proceed"
+        result["evidence"]["trades_count"] = trades_count
+        result["evidence"]["distinct_symbols_count"] = distinct_symbols_count
+        result["evidence"]["verification_sql"] = {
+            "trades_count": f"select count(*) from trades where user_id='{user_id}';",
+            "distinct_symbols": f"select count(distinct symbol) from trades where user_id='{user_id}';",
+            "positions_count": f"select count(*) from positions where user_id='{user_id}';"
+        }
+        
         return result
         
     except HTTPException:

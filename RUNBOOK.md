@@ -494,6 +494,312 @@ grep -rn "from app.fx\|get_rate\|convert("   services/portfolio-service/app/posi
 
 ---
 
+# Sprint: Prevent "Empty Rebuild" 驗收（前置條件檢查）
+
+**目標**：把「rebuild_positions 成功但 symbols_count=0（其實是 trades 尚未 sync）」的問題變成可被系統強制保證的流程。
+
+**核心原則**：讓前置條件變成系統合約，而不是操作習慣。前置條件不足就要「可證偽地」失敗，不准靜默成功。
+
+---
+
+## 🚨 問題陳述（Why）
+
+**常見情況**（VM / 新環境）：
+```bash
+curl -X POST http://localhost:8001/portfolio/rebuild_positions?user_id=tony
+# 回傳：status="succeeded", symbols_count=0, positions 表空
+
+# 但實際上是 trades 表還沒資料（需要先 sync）
+curl -X POST http://localhost:8001/portfolio/sync?user_id=tony
+# sync 完才有 66 筆 trades
+
+# 再 rebuild 才有意義
+curl -X POST http://localhost:8001/portfolio/rebuild_positions?user_id=tony  
+# 現在：status="succeeded", symbols_count=5, positions 表有資料
+```
+
+**危害**：
+- 使用者誤判「rebuild 成功」但其實沒有實質效果
+- automation 腳本無法判斷前置條件是否滿足
+- 缺乏可證偽的失敗機制
+
+---
+
+## ✅ 解決方案（What）
+
+### 1. 新增 `require_trades` 參數
+
+**端點**：`POST /portfolio/rebuild_positions`
+
+**新增 query 參數**：
+- `require_trades: bool = false`（預設 false 保持相容）
+
+**行為**：
+- 當 `require_trades=true` 且 trades_count=0：
+  - 回傳 **409 Conflict**
+  - `status="precondition_failed"`
+  - `symbols_count=0`
+  - `evidence` 包含可證偽的 `verification_sql`
+
+**範例（前置條件失敗）**：
+```bash
+curl -X POST "http://localhost:8001/portfolio/rebuild_positions?user_id=tony&require_trades=1"
+```
+
+回傳（409 Conflict）：
+```json
+{
+  "detail": {
+    "status": "precondition_failed",
+    "user_id": "tony",
+    "symbols_count": 0,
+    "upserted_count": 0,
+    "deleted_or_zeroed_count": 0,
+    "run_id": "",
+    "evidence": {
+      "require_trades": true,
+      "decision": "blocked_precondition",
+      "trades_count": 0,
+      "distinct_symbols_count": 0,
+      "verification_sql": {
+        "trades_count": "select count(*) from trades where user_id='tony';",
+        "distinct_symbols": "select count(distinct symbol) from trades where user_id='tony';"
+      }
+    },
+    "message": "前置條件不滿足：該用戶在 trades 表無交易記錄，無法執行 rebuild_positions（require_trades=true）"
+  }
+}
+```
+
+**範例（前置條件滿足）**：
+```bash
+# 先 sync
+curl -X POST http://localhost:8001/portfolio/sync?user_id=tony
+
+# 再 rebuild（require_trades=true）
+curl -X POST "http://localhost:8001/portfolio/rebuild_positions?user_id=tony&require_trades=1"
+```
+
+回傳（200 OK）：
+```json
+{
+  "status": "succeeded",
+  "user_id": "tony",
+  "symbols_count": 5,
+  "upserted_count": 5,
+  "deleted_or_zeroed_count": 0,
+  "run_id": "...",
+  "evidence": {
+    "require_trades": true,
+    "decision": "proceed",
+    "trades_count": 66,
+    "distinct_symbols_count": 5,
+    "verification_sql": {
+      "trades_count": "select count(*) from trades where user_id='tony';",
+      "distinct_symbols": "select count(distinct symbol) from trades where user_id='tony';",
+      "positions_count": "select count(*) from positions where user_id='tony';"
+    },
+    ...
+  }
+}
+```
+
+---
+
+### 2. 新增輕量探針端點
+
+**端點**：`GET /portfolio/trades/summary`
+
+**用途**：
+- 讓其他服務或腳本先確認前置條件（不需回傳完整 Trade 物件）
+- automation 腳本可先打這個端點判斷是否需要呼叫 sync
+- 診斷工具（確認 sync 是否成功）
+
+**範例請求**：
+```bash
+curl -s "http://localhost:8001/portfolio/trades/summary?user_id=tony" | jq
+```
+
+**範例回應**：
+```json
+{
+  "user_id": "tony",
+  "trades_count": 66,
+  "symbols_count": 5,
+  "min_trade_date": "2024-01-01",
+  "max_trade_date": "2024-12-31",
+  "evidence": {
+    "verification_sql": {
+      "trades_count": "select count(*) from trades where user_id='tony';",
+      "distinct_symbols": "select count(distinct symbol) from trades where user_id='tony';"
+    }
+  }
+}
+```
+
+---
+
+## 🧪 驗收命令（一鍵驗證）
+
+```bash
+# 1) 確認 trades summary
+curl -s "http://localhost:8001/portfolio/trades/summary?user_id=tony" | jq
+
+# 2) 嘗試 require_trades=1 的 rebuild（若 trades=0 應該被擋）
+curl -s -X POST "http://localhost:8001/portfolio/rebuild_positions?user_id=tony&require_trades=1" | jq
+
+# 3) 先 sync 再 rebuild（應該成功）
+curl -s -X POST "http://localhost:8001/portfolio/sync?user_id=tony" | jq
+curl -s -X POST "http://localhost:8001/portfolio/rebuild_positions?user_id=tony&require_trades=1" | jq
+
+# 4) DB 驗證（positions 應該有資料）
+docker compose exec -T postgres psql -U investment -d investment_db -c \
+"select user_id, count(*) from positions where user_id='tony' group by user_id;"
+
+# 5) 執行完整測試套件
+docker compose exec -T portfolio-service \
+  pytest tests/test_trades_summary_and_require_trades.py -v
+# 期望：6 passed
+```
+
+---
+
+## 📋 可證偽檢查清單
+
+✅ **端點存在且回應正確**：
+```bash
+curl -s "http://localhost:8001/portfolio/trades/summary?user_id=tony" | jq .trades_count
+# 應回傳數字（可能是 0 或 >0）
+
+curl -s -X POST "http://localhost:8001/portfolio/rebuild_positions?user_id=tony&require_trades=0" | jq .status
+# 應回傳 "succeeded"（require_trades=false 允許空 trades）
+```
+
+✅ **require_trades=true 能正確擋住空 trades**：
+```bash
+# 確保 tony 無 trades
+docker compose exec -T postgres psql -U investment -d investment_db -c \
+"delete from positions where user_id='tony'; delete from trades where user_id='tony';"
+
+curl -s -X POST "http://localhost:8001/portfolio/rebuild_positions?user_id=tony&require_trades=1"
+# HTTP 409, detail.status="precondition_failed", evidence.trades_count=0
+```
+
+✅ **evidence 包含可證偽的 verification_sql**：
+```bash
+curl -s -X POST "http://localhost:8001/portfolio/rebuild_positions?user_id=tony&require_trades=1" | jq .detail.evidence.verification_sql
+# 應包含 trades_count 和 distinct_symbols 的 SQL 語句
+```
+
+✅ **測試通過**：
+```bash
+docker compose exec -T portfolio-service \
+  pytest tests/test_trades_summary_and_require_trades.py -v
+# 6 passed：
+# - test_trades_summary_empty_returns_zero
+# - test_trades_summary_after_insert_returns_counts
+# - test_rebuild_positions_require_trades_blocks_when_empty
+# - test_rebuild_positions_require_trades_proceeds_when_has_trades
+# - test_rebuild_positions_default_require_trades_false_allows_empty
+# - test_evidence_verification_sql_contains_all_required_fields
+```
+
+---
+
+## 🔥 故障排除
+
+### 問題：require_trades=1 但還是回傳 succeeded（應該回 409）
+
+**診斷**：
+```bash
+# 檢查 trades 是否真的為空
+docker compose exec -T postgres psql -U investment -d investment_db -c \
+"select count(*) from trades where user_id='tony';"
+```
+
+**原因**：
+- trades 表其實有資料（檢查是否有其他來源的交易）
+- 端點邏輯未正確實作前置檢查
+
+**解決**：
+- 檢查 [main.py](services/portfolio-service/app/main.py) 的 `rebuild_positions` 函數
+- 確認 `count_trades_for_user(db, user_id)` 被正確呼叫
+- 確認 `if require_trades and trades_count == 0:` 邏輯存在
+
+---
+
+### 問題：trades/summary 回傳 404
+
+**診斷**：
+```bash
+curl -v "http://localhost:8001/portfolio/trades/summary?user_id=tony"
+```
+
+**原因**：
+- 端點未註冊或路徑錯誤
+- portfolio-service 容器未重建（新程式碼未載入）
+
+**解決**：
+```bash
+docker compose up -d --build portfolio-service
+docker compose logs -f portfolio-service
+# 檢查啟動日誌，確認端點註冊
+```
+
+---
+
+### 問題：evidence.verification_sql 缺失
+
+**診斷**：
+```bash
+curl -s "http://localhost:8001/portfolio/trades/summary?user_id=tony" | jq .evidence
+# 應該有 verification_sql 欄位
+```
+
+**原因**：
+- schema 未更新或回應未包含 evidence
+- 端點邏輯缺少 evidence 組裝
+
+**解決**：
+- 檢查 [schemas.py](services/portfolio-service/app/schemas.py) 的 `TradesSummaryResponse`
+- 檢查 [main.py](services/portfolio-service/app/main.py) 的 `get_trades_summary` 函數
+- 確認回傳 dict 包含 `evidence` 和 `verification_sql` 欄位
+
+---
+
+## 🛡️ 設計邊界（禁止事項）
+
+🚫 **禁止 rebuild_positions 內部偷偷呼叫 sync**：
+- 避免副作用（API 應該單一職責）
+- 避免隱性耗時（sync 可能很慢）
+- 避免「看起來成功但其實做了很多事」
+
+🚫 **禁止 require_trades 預設為 true**：
+- 保持向後相容（既有行為不變）
+- 使用者可選擇是否啟用嚴格模式
+
+🚫 **禁止 valuation-service 直連 DB**：
+- microservices 邊界：portfolio-service 是唯一能接觸 trades/positions DB 的服務
+- valuation-service 只能透過 portfolio-service API 拿資料
+
+---
+
+## 📊 交付清單
+
+✅ **程式碼**：
+- [trades_repository.py](services/portfolio-service/app/trades_repository.py)：`count_trades_for_user()`, `count_distinct_symbols_for_user()`
+- [schemas.py](services/portfolio-service/app/schemas.py)：`TradesSummaryResponse`
+- [main.py](services/portfolio-service/app/main.py)：`GET /portfolio/trades/summary`, `rebuild_positions` 增加 `require_trades` 參數
+
+✅ **測試**：
+- [test_trades_summary_and_require_trades.py](services/portfolio-service/tests/test_trades_summary_and_require_trades.py)：6 個測試用例，全部通過
+
+✅ **文件**：
+- RUNBOOK.md：本節（操作手冊）
+- Development.md：設計文件與技術決策
+
+---
+
 # Sprint 1-4.3 驗收：Positions 寫回（帳務層完成）
 
 **目標**：從 `trades` 表重算並寫入 `positions` 表，只做帳務（qty/avg_cost/realized_pnl），不做估值/匯率。
