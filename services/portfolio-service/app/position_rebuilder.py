@@ -91,12 +91,16 @@ class PositionRebuilder:
             grouped_trades = defaultdict(list)
 
             for trade_orm in trades_orm:
+                # 將 ORM 轉為 Pydantic TradeRecord
+                # 注意：DB 中賣出交易的 quantity 可能是負數，需轉為正數
+                quantity = abs(trade_orm.quantity)  # 確保 quantity 總是正數
+                
                 trade_record = TradeRecord(
                     user_id=trade_orm.user_id,
                     symbol=trade_orm.symbol,
                     asset_ccy=trade_orm.asset_ccy,
                     side=trade_orm.side,
-                    quantity=trade_orm.quantity,
+                    quantity=quantity,  # 使用轉換後的正數
                     price=trade_orm.price,
                     fee=trade_orm.fee,
                     trade_date=trade_orm.trade_date,

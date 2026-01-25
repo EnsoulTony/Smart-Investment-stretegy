@@ -18,7 +18,7 @@ class TradeRecord(BaseModel):
     symbol: str = Field(..., min_length=1, description="股票代碼（例如：AAPL、QQQ）")
     asset_ccy: str = Field(..., min_length=1, description="資產幣別（例如：USD、TWD）")
     side: str = Field(..., description="交易方向：BUY 或 SELL")
-    quantity: Decimal = Field(..., gt=0, description="交易數量，必須 > 0")
+    quantity: Decimal = Field(..., description="交易數量（買入為正，賣出為負）")
     price: Decimal = Field(..., gt=0, description="成交價格，必須 > 0")
     fee: Decimal = Field(default=Decimal("0"), ge=0, description="手續費，必須 >= 0")
     trade_date: datetime = Field(..., description="交易日期時間")
