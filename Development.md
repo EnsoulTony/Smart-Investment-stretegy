@@ -11,6 +11,12 @@
 5. **測試與驗證**：執行 `TESTING.md` 列出的指令，確保健康檢查與單元測試通過。
 6. **部署準備**：更新 `CHANGELOG.md`、確認 `DEPLOYMENT.md` 流程、觸發 GitHub Actions。
 
+## 硬隔離規則（必遵守）
+
+- **服務容器不得持有超出職責範圍的敏感連線設定**。
+   - 例如：valuation-service **不得**持有 `DATABASE_URL` / `POSTGRES_*` 等 DB 連線資訊。
+   - 估值層只能透過 portfolio-service 的 HTTP API 取數。
+
 ## Prompt 模板（依階段區分）
 
 ### 1. 架構/雛型設計

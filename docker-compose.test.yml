@@ -30,6 +30,7 @@ services:
       pytest -q
     environment:
       DATABASE_URL: postgresql://investment:investment@postgres:5432/investment_db
+      PORTFOLIO_DATABASE_URL: postgresql://investment:investment@postgres:5432/investment_db
     security_opt:
       - apparmor:unconfined
 

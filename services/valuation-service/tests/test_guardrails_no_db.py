@@ -214,6 +214,52 @@ def test_codebase_no_psycopg2_usage():
 
 
 # ============================================================================
+# 🚫 Guardrail 5: docker-compose 禁止 valuation-service 注入 DB 連線資訊
+# ============================================================================
+
+def test_compose_no_db_env_for_valuation_service():
+    """掃描 docker-compose*.yml，禁止 valuation-service 注入 DB 連線資訊"""
+    repo_root = Path(__file__).resolve().parents[3]
+    compose_files = [
+        repo_root / "docker-compose.yml",
+        repo_root / "docker-compose.test.yml",
+    ]
+
+    forbidden_envs = [
+        "DATABASE_URL",
+        "POSTGRES_HOST",
+        "POSTGRES_PORT",
+        "POSTGRES_DB",
+        "POSTGRES_USER",
+        "POSTGRES_PASSWORD",
+    ]
+
+    violations = []
+    for compose_path in compose_files:
+        if not compose_path.exists():
+            continue
+
+        lines = compose_path.read_text().splitlines()
+        in_service = False
+
+        for idx, line in enumerate(lines, 1):
+            if line.startswith("  ") and not line.startswith("    "):
+                in_service = line.strip() == "valuation-service:"
+
+            if not in_service:
+                continue
+
+            for env_key in forbidden_envs:
+                if env_key in line:
+                    violations.append(f"{compose_path.name}:{idx} - {env_key}")
+
+    assert not violations, (
+        "❌ 違反硬隔離規則：valuation-service 禁止注入 DB 連線設定！\n"
+        + "\n".join(f"  - {v}" for v in violations)
+    )
+
+
+# ============================================================================
 # ✅ 正向檢查：確認有使用 HTTP client
 # ============================================================================
 

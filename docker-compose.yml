@@ -40,7 +40,7 @@ services:
       GOOGLE_SA_JSON: ${GOOGLE_SA_JSON}
       PORT: 8001
       SERVICE_NAME: portfolio-service
-      DATABASE_URL: ${DATABASE_URL:-postgresql://investment:investment@postgres:5432/investment_db}
+      PORTFOLIO_DATABASE_URL: ${PORTFOLIO_DATABASE_URL:-postgresql://investment:investment@postgres:5432/investment_db}
     depends_on:
     - postgres
     ports:

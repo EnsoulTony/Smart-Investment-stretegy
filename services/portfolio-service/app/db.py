@@ -8,7 +8,11 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker, declarative_base
 
 # 從環境變數讀取資料庫連線字串
-DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://investment:investment@localhost:5432/investment_db")
+# 優先使用 PORTFOLIO_DATABASE_URL，避免其他服務誤用 DATABASE_URL
+DATABASE_URL = os.getenv(
+    "PORTFOLIO_DATABASE_URL",
+    os.getenv("DATABASE_URL", "postgresql://investment:investment@localhost:5432/investment_db")
+)
 
 # 建立 engine（同步模式）
 engine = create_engine(

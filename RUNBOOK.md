@@ -45,6 +45,12 @@ test -n "$GOOGLE_SHEET_ID" && echo "GOOGLE_SHEET_ID is set" || echo "Missing GOO
 echo "$GOOGLE_SA_JSON" | python3 -m json.tool > /dev/null && echo "Valid JSON" || echo "Invalid JSON"
 ```
 
+### 1.2. 硬隔離規則（服務環境變數）
+
+- **任何服務容器不得持有超出職責範圍的敏感連線設定**。
+	- 例如：valuation-service **不得**持有 `DATABASE_URL` / `POSTGRES_*` 等 DB 連線資訊。
+	- 估值層只能透過 portfolio-service 的 HTTP API 取數。
+
 ## 2. 異常排查對照表
 
 | 症狀 | 可能原因 | 處理步驟 |
