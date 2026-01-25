@@ -135,6 +135,9 @@ class SyncService:
                 logger.info(f"寫入完成：插入 {inserted_count} 筆，重複跳過 {duplicates_count} 筆")
             else:
                 logger.warning("無有效交易記錄可寫入")
+
+            # 正確的 normalized_valid_count 應包含後續被判定為重複的筆數
+            normalized_valid_count = inserted_count + duplicates_count
             
             # skipped_count = 重複筆數 + 驗證失敗筆數
             skipped_count = duplicates_count + errors_count
@@ -156,12 +159,15 @@ class SyncService:
                 error_message = json.dumps(error_summary, ensure_ascii=False)
             
             # Step 6: 判斷同步狀態
-            if errors_count == 0:
-                status = "succeeded"
-            elif inserted_count + 0 > 0:  # updated_count 目前固定為 0
+            if inserted_count > 0 and (errors_count > 0 or duplicates_count > 0):
                 status = "partial_succeeded"
-            else:
+            elif inserted_count > 0 and errors_count == 0 and duplicates_count == 0:
+                status = "succeeded"
+            elif inserted_count == 0 and errors_count > 0:
                 status = "failed"
+            else:
+                # inserted_count == 0 且只因重複跳過 → 視為成功
+                status = "succeeded"
             
             logger.info(f"同步狀態：{status}")
             

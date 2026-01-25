@@ -378,7 +378,7 @@ def get_positions(
     
     架構鐵律：
     - 只回傳帳務欄位（symbol, asset_ccy, quantity, avg_cost, realized_pnl, cost_basis）
-    - 不做匯率折算（不呼叫 app/fx 模組）
+    - 不做匯率折算（不呼叫匯率模組）
     
     回應欄位：
     - symbol: 股票代碼

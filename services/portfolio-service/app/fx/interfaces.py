@@ -1,11 +1,11 @@
-"""FX 匯率折算模組：介面定義（Boundary）
+"""匯率折算模組：介面定義（Boundary）
 
 定義 FxProvider 介面，作為匯率折算的唯一邊界。
 全專案所有匯率查詢/轉換必須透過此介面，嚴禁直接讀取環境變數或實作。
 
 架構原則：
 - 帳務層（Accounting Layer）：使用 asset_ccy 記帳，由資料庫欄位定義
-- 估值層（Valuation Layer）：使用 valuation_ccy（通常為 TWD）折算，由此模組提供
+- 評價層：使用報價幣別（通常為 TWD）折算，由此模組提供
 - Portfolio Service 的 rebuild_positions 屬於帳務層，不做折算
 """
 from abc import ABC, abstractmethod

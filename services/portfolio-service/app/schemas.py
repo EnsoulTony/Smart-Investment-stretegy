@@ -181,7 +181,7 @@ class TradesSummaryResponse(BaseModel):
     
     使用場景：
     - automation 腳本在呼叫 rebuild_positions 前先確認是否有交易記錄
-    - valuation-service 確認 portfolio-service 的資料範圍
+    - 下游服務確認 portfolio-service 的資料範圍
     - 診斷工具（確認 sync 是否成功）
     """
     user_id: str = Field(..., description="使用者 ID")

@@ -237,6 +237,11 @@ class TradeNormalizer:
             
             # 使用 Pydantic 驗證與轉換
             trade_record = TradeRecord(**mapped_data)
+
+            # quantity 必須 > 0（0 或負數視為無效）
+            if trade_record.quantity <= 0:
+                return None, "quantity 必須 > 0"
+
             return trade_record, None
             
         except ValidationError as e:
