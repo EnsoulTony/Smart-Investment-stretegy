@@ -492,6 +492,136 @@ grep -rn "from app.fx\|get_rate\|convert("   services/portfolio-service/app/posi
 | **1-4.3** | 帳務重算（positions 表寫入，`unrealized_pnl=0`） | 估值計算、匯率折算、FX 模組呼叫 |
 | **1-4.B** | 估值層實作（匯率來源、cache、valuation 欄位） | 估值邏輯散落到非 valuation_service.py |
 
+---
+
+# Sprint 1-4.3 驗收：Positions 寫回（帳務層完成）
+
+**目標**：從 `trades` 表重算並寫入 `positions` 表，只做帳務（qty/avg_cost/realized_pnl），不做估值/匯率。
+
+**驗收命令**（可證偽）：
+
+### 1. 測試套件通過
+
+```bash
+# 所有測試（無警告）
+docker compose exec -T portfolio-service pytest -q
+# 期望：93 passed, 1 skipped, <2s
+
+# rebuild 相關測試
+docker compose exec -T portfolio-service pytest -q -k rebuild
+# 期望：16+ passed（寫入、冪等性、零持倉刪除）
+```
+
+### 2. API 回傳欄位驗證
+
+```bash
+# 呼叫 rebuild_positions（query 參數）
+curl -s -X POST 'http://localhost:8001/portfolio/rebuild_positions?user_id=tony' | jq
+
+# 預期輸出：
+# {
+#   "status": "succeeded",
+#   "user_id": "tony",
+#   "symbols_count": <int>,
+#   "upserted_count": <int>,
+#   "deleted_or_zeroed_count": <int>,
+#   "run_id": "<uuid>",
+#   "evidence": {
+#     "positions_columns": [
+#       "user_id", "symbol", "asset_ccy", "quantity",
+#       "avg_cost", "realized_pnl", "u_pnl", "last_updated_at"
+#     ]
+#   }
+# }
+
+# 驗證點：
+# - run_id 為 UUID 格式
+# - symbols_count >= 0
+# - evidence.positions_columns 包含 8 個欄位
+```
+
+### 3. 資料庫寫入驗證（psql）
+
+```bash
+# 查看 positions 表結構
+docker compose exec -T postgres psql -U portfolio_user -d portfolio_db \
+  -c "\d positions"
+
+# 預期欄位：
+# - quantity (numeric)
+# - avg_cost (numeric)
+# - realized_pnl (numeric)
+# - u_pnl (numeric) ← 當前固定 0
+
+# 查看實際資料
+docker compose exec -T postgres psql -U portfolio_user -d portfolio_db \
+  -c "SELECT user_id, symbol, quantity, avg_cost, realized_pnl, u_pnl \
+      FROM positions WHERE user_id='tony' LIMIT 5;"
+
+# 驗證點：
+# - u_pnl 固定為 0（不做估值）
+# - quantity, avg_cost, realized_pnl 有真實數值
+```
+
+### 4. 禁止規則驗證（Guardrails）
+
+```bash
+# 帳務層禁止 FX 模組
+grep -rn "from app.fx" services/portfolio-service/app/position_rebuilder.py
+# 期望：（空）
+
+# 帳務層禁止折算邏輯
+grep -rn "fx\.convert\|fx\.get_rate\|target_ccy" \
+  services/portfolio-service/app/position_rebuilder.py \
+  services/portfolio-service/app/domain/avg_cost_calculator.py
+# 期望：（空）
+
+# 估值層禁止 DB 直連
+docker compose exec -T valuation-service pytest -q tests/test_guardrails_no_db.py
+# 期望：5 passed
+```
+
+**可證偽檢查清單**（Sprint 1-4.3 階段）：
+
+- ✅ `rebuild_positions` 回傳包含 `run_id`, `symbols_count`, `evidence`
+- ✅ positions 表有 `u_pnl` 欄位（但值固定為 0）
+- ✅ 連續執行兩次 rebuild，結果一致（冪等性）
+- ✅ 賣光持倉後，positions 表自動刪除該筆記錄
+- ❌ positions 表**無**估值欄位（`valuation_ccy`, `market_value`, `market_price`）
+- ❌ portfolio-service 不呼叫 FX 模組（grep 無匹配）
+- ❌ valuation-service 不直連 DB（pytest guardrails 通過）
+
+**Troubleshooting**（當寫入數量/金額不符時）：
+
+1. **檢查 trades 來源**：
+   ```sql
+   SELECT user_id, symbol, asset_ccy, COUNT(*), SUM(quantity)
+   FROM trades WHERE user_id='<user_id>' GROUP BY 1,2,3;
+   ```
+
+2. **檢查分組與排序**：
+   ```bash
+   grep -A 5 "group_by\|order_by" services/portfolio-service/app/position_rebuilder.py
+   # 必須按 (user_id, symbol, asset_ccy) 分組，trade_date ASC 排序
+   ```
+
+3. **檢查 UPSERT 衝突鍵**：
+   ```sql
+   SELECT conname, pg_get_constraintdef(oid)
+   FROM pg_constraint
+   WHERE conrelid = 'positions'::regclass AND contype = 'u';
+   -- 預期：(user_id, symbol, asset_ccy) 唯一索引
+   ```
+
+4. **驗證冪等性**（連續執行兩次）：
+   ```bash
+   curl -X POST 'http://localhost:8001/portfolio/rebuild_positions?user_id=tony' | jq .symbols_count
+   curl -X POST 'http://localhost:8001/portfolio/rebuild_positions?user_id=tony' | jq .symbols_count
+   # 兩次結果應相同
+   ```
+
+---
+
 **檢查範例**（Sprint 1-4.3 驗收）：
 
 ```bash
