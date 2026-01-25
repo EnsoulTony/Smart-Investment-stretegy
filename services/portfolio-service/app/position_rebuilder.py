@@ -142,34 +142,73 @@ class PositionRebuilder:
                 )
                 logger.error("Fail Fast 驗證失敗，user_id=%s, errors_count=%d", user_id, len(validation_errors))
                 raise ValueError(error_msg)
-                    avg_cost=state.avg_cost,
-                    realized_pnl=state.realized_pnl,
-                    u_pnl=Decimal("0"),
-                    last_updated_at=datetime.now(timezone.utc)
-                )
 
-                self.session.merge(position)
-                upserted_count += 1
-
-            self.session.commit()
-
+            # 開始 transaction：逐一處理每個 symbol
+                        # 開始 transaction：逐一處理每個 symbol
+            upserted_count = 0
+            deleted_or_zeroed_count = 0
             run_id = str(uuid4())
-            evidence = {
-                "positions_columns": list(Position.__table__.columns.keys())
-            }
+            
+            try:
+                from app.models import Position  # 確保已導入 Position 模型
+                
+                for (symbol, asset_ccy), trades in grouped_trades.items():
+                    state = compute_avg_cost(trades)
+                    
+                    # 若最終持倉為 0,刪除或標記為已清空
+                    if state.remaining_qty == 0:
+                        existing_position = self.session.query(Position).filter_by(
+                            user_id=user_id,
+                            symbol=symbol,
+                            asset_ccy=asset_ccy
+                        ).first()
+                        
+                        if existing_position:
+                            self.session.delete(existing_position)
+                            deleted_or_zeroed_count += 1
+                            logger.debug(f"刪除已清空持倉,symbol={symbol}, asset_ccy={asset_ccy}")
+                        continue
+                    
+                    # 否則建立或更新持倉
+                    position = Position(
+                        user_id=user_id,
+                        symbol=symbol,
+                        asset_ccy=asset_ccy,
+                        quantity=state.remaining_qty,
+                        avg_cost=state.avg_cost,
+                        realized_pnl=state.realized_pnl,
+                        u_pnl=Decimal("0"),
+                        last_updated_at=datetime.now(timezone.utc)
+                    )
 
-            result = {
-                "status": "succeeded",
-                "user_id": user_id,
-                "symbols_count": len(grouped_trades),
-                "upserted_count": upserted_count,
-                "deleted_or_zeroed_count": deleted_or_zeroed_count,
-                "run_id": run_id,
-                "evidence": evidence,
-            }
+                    self.session.merge(position)
+                    upserted_count += 1
 
-            logger.info("持倉重算完成，user_id=%s, result=%s", user_id, result)
-            return result
+                self.session.commit()
+                
+                evidence = {
+                    "run_id": run_id,
+                    "positions_columns": list(Position.__table__.columns.keys())
+                }
+
+                result = {
+                    "status": "succeeded",
+                    "user_id": user_id,
+                    "symbols_count": len(grouped_trades),
+                    "upserted_count": upserted_count,
+                    "deleted_or_zeroed_count": deleted_or_zeroed_count,
+                    "run_id": run_id,
+                    "evidence": evidence,
+                }
+
+                logger.info("持倉重算完成,user_id=%s, result=%s", user_id, result)
+                return result
+
+            except Exception as db_error:
+                # Transaction 失敗時回滾
+                logger.exception("持倉重算 transaction 失敗,user_id=%s", user_id)
+                self.session.rollback()
+                raise
 
         except ValueError as e:
             # P0: 業務邏輯錯誤（例如：賣空、資料驗證失敗）
