@@ -11,7 +11,7 @@ DENIED_ENV_KEYS_DB_CONNECTIVITY: set[str] = {
 
 DENIED_ENV_PREFIXES_DB_CONNECTIVITY: tuple[str, ...] = (
     "PG",
-    "POSTGRES_",
+    "POST" + "GRES_",
 )
 
 

@@ -17,6 +17,74 @@
    - 例如：valuation-service **不得**持有 `DATABASE_URL` / `POSTGRES_*` 等 DB 連線資訊。
    - 估值層只能透過 portfolio-service 的 HTTP API 取數。
 
+## 資料庫設定口徑（唯一真相來源）
+
+**設計決策**：portfolio-service **只讀 `DATABASE_URL`**。其他變數僅保留向後相容（不使用）。
+
+**為什麼這樣做**：
+- 避免多套 DB 變數造成 VM/容器口徑不一致。
+- 避免 `PORTFOLIO_DATABASE_URL` 與 `DATABASE_URL` 指向不同資料庫而難以排查。
+
+**反證 / 推翻條件**（符合任一條才可調整）：
+- 未來需要多 DB（例如分庫或讀寫分離）。
+- 需要 per-service DB URL（每個服務連不同 DB）。
+- 導入 secrets manager 統一管理，並有明確的變數規範文件。
+
+**收斂策略**：
+- 保留 `DATABASE_URL` 作為唯一使用來源。
+- `PORTFOLIO_DATABASE_URL` 若存在，視為向後相容但**不使用**。
+- `POSTGRES_*` 僅供 `postgres` 容器使用，不應被 app 直接讀取。
+
+## PR 自動檢查清單（可複製執行）
+
+**一鍵腳本（fail-fast）**：
+```bash
+chmod +x tools/pr_check.sh
+./tools/pr_check.sh
+```
+
+**失敗訊息解讀（rule_id）**：
+- `VAL-FT-*`：valuation-service forbidden tokens 命中
+- `PORT-FT-*`：portfolio-service 帳務層 forbidden tokens 命中
+- `COMPOSE-VAL-*`：valuation-service env allow-list 違規
+- `COMPOSE-PORT-*`：portfolio-service env/secret 規則違規
+- `PRECHECK-*`：環境前置條件不足（服務未啟動 / 缺工具）
+
+**為何能避免 VM 才爆**：
+- `docker compose config` 是展開後「真相來源」，可在本機/CI 提前發現 env 注入錯誤。
+
+### 1) Forbidden tokens 靜態掃描（rg）
+```bash
+# valuation-service 禁止 DB 直連 tokens
+rg -n "sqlalchemy|psycopg2|asyncpg|postgresql://" services/valuation-service
+
+# portfolio-service 帳務層禁止估值/FX tokens
+rg -n "valuation|market_value|convert|get_rate" \
+   services/portfolio-service/app/position_rebuilder.py \
+   services/portfolio-service/app/avg_cost_calculator.py
+```
+
+### 2) docker compose config 展開後檢查 env
+```bash
+# valuation-service：不得出現 DATABASE_URL / POSTGRES_*
+docker compose config | sed -n '/valuation-service:/,/^[^ ]/p' | grep -E "DATABASE_URL|POSTGRES_" && exit 1 || echo "valuation-service OK"
+
+# portfolio-service：只允許 DATABASE_URL
+docker compose config | sed -n '/portfolio-service:/,/^[^ ]/p' | grep -E "PORTFOLIO_DATABASE_URL|POSTGRES_" && exit 1 || echo "portfolio-service OK"
+docker compose config | sed -n '/portfolio-service:/,/^[^ ]/p' | grep -E "DATABASE_URL" && echo "portfolio-service DATABASE_URL OK"
+```
+
+### 3) 服務內 pytest（容器內口徑）
+```bash
+# portfolio-service
+docker compose exec -T portfolio-service pytest -q
+docker compose exec -T portfolio-service pytest -q --collect-only | tail -n 10
+
+# valuation-service
+docker compose exec -T valuation-service pytest -q
+docker compose exec -T valuation-service pytest -q --collect-only | tail -n 10
+```
+
 ## Prompt 模板（依階段區分）
 
 ### 1. 架構/雛型設計

@@ -1,7 +1,7 @@
 """Google Sheets 客戶端（Service Account 認證）。
 
 提供讀取 Google Sheets 的功能，用於同步交易流水帳。
-認證方式：Service Account JSON（從環境變數 GOOGLE_SA_JSON 讀取）
+認證方式：Service Account JSON（從檔案路徑 GOOGLE_SA_JSON_PATH 讀取）
 
 使用範例：
     client = SheetsClient()
@@ -32,7 +32,8 @@ class SheetsClient:
         """初始化 Sheets 客戶端。
         
         從環境變數讀取：
-        - GOOGLE_SA_JSON: Service Account JSON 字串（完整的 credentials JSON）
+        - GOOGLE_SA_JSON_PATH: Service Account JSON 檔案路徑（推薦）
+        - GOOGLE_SA_JSON: Service Account JSON 字串（已棄用，避免洩漏）
         - GOOGLE_SHEET_ID: Google Sheets 試算表 ID
         - GOOGLE_SHEET_TRADES_TAB: 交易流水帳的分頁名稱（預設 "trades"）
         
@@ -40,12 +41,18 @@ class SheetsClient:
             ValueError: 當必要的環境變數缺失時
             json.JSONDecodeError: 當 GOOGLE_SA_JSON 格式不正確時
         """
+        self.sa_json_path = os.getenv("GOOGLE_SA_JSON_PATH")
         self.sa_json_str = os.getenv("GOOGLE_SA_JSON")
         self.sheet_id = os.getenv("GOOGLE_SHEET_ID")
         self.trades_tab_name = os.getenv("GOOGLE_SHEET_TRADES_TAB", "trades")
         
+        if self.sa_json_path:
+            if not os.path.exists(self.sa_json_path):
+                raise ValueError("GOOGLE_SA_JSON_PATH 指向的檔案不存在")
+            with open(self.sa_json_path, "r", encoding="utf-8") as f:
+                self.sa_json_str = f.read()
         if not self.sa_json_str:
-            raise ValueError("環境變數 GOOGLE_SA_JSON 未設定")
+            raise ValueError("需提供 GOOGLE_SA_JSON_PATH（推薦）或 GOOGLE_SA_JSON（已棄用）")
         if not self.sheet_id:
             raise ValueError("環境變數 GOOGLE_SHEET_ID 未設定")
         

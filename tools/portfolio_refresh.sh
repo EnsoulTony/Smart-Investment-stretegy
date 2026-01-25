@@ -67,6 +67,7 @@ fi
 
 TRADES_COUNT=$(echo "${SUMMARY_BODY}" | jq -r '.trades_count')
 SYMBOLS_COUNT=$(echo "${SUMMARY_BODY}" | jq -r '.symbols_count')
+DECISION="sync_skipped"
 
 echo "  trades_count: ${TRADES_COUNT}"
 echo "  symbols_count: ${SYMBOLS_COUNT}"
@@ -80,7 +81,8 @@ fi
 
 # Step 2: 若 trades_count == 0，執行 sync
 if [ "${TRADES_COUNT}" -eq 0 ]; then
-    echo -e "${YELLOW}⚠️  trades_count=0，需要執行 sync${NC}"
+    echo -e "${YELLOW}⚠️  trades_count=0，需要先 sync（不得直接 rebuild）${NC}"
+    DECISION="sync_required"
     echo ""
     echo -e "${BLUE}📥 Step 2: 執行 sync${NC}"
     
@@ -134,6 +136,7 @@ if [ "${TRADES_COUNT}" -eq 0 ]; then
         exit 1
     fi
     
+    DECISION="sync_executed"
     echo -e "${GREEN}✅ sync 成功，trades_count=${TRADES_COUNT}${NC}"
 else
     echo -e "${GREEN}✅ trades 已有資料，跳過 sync${NC}"
@@ -184,17 +187,45 @@ EVIDENCE=$(echo "${REBUILD_BODY}" | jq '.evidence')
 echo "${EVIDENCE}" | jq .
 
 # 提取 verification_sql
-VERIFICATION_SQL_TRADES=$(echo "${EVIDENCE}" | jq -r '.verification_sql.trades_count' 2>/dev/null || echo "")
+VERIFICATION_SQL_TRADES=$(echo "${SUMMARY_BODY}" | jq -r '.evidence.verification_sql.trades_count' 2>/dev/null || echo "")
+VERIFICATION_SQL_SYMBOLS=$(echo "${SUMMARY_BODY}" | jq -r '.evidence.verification_sql.distinct_symbols' 2>/dev/null || echo "")
 VERIFICATION_SQL_POSITIONS=$(echo "${EVIDENCE}" | jq -r '.verification_sql.positions_count' 2>/dev/null || echo "")
 
 if [ -n "${VERIFICATION_SQL_TRADES}" ]; then
     echo ""
     echo -e "${YELLOW}📊 可執行的驗證 SQL:${NC}"
     echo "  Trades:    ${VERIFICATION_SQL_TRADES}"
+        if [ -n "${VERIFICATION_SQL_SYMBOLS}" ]; then
+                echo "  Symbols:   ${VERIFICATION_SQL_SYMBOLS}"
+        fi
     if [ -n "${VERIFICATION_SQL_POSITIONS}" ]; then
         echo "  Positions: ${VERIFICATION_SQL_POSITIONS}"
     fi
 fi
+
+# Step 4: 輸出統一證據（system contract）
+echo ""
+echo -e "${YELLOW}🧾 Evidence JSON（system contract）:${NC}"
+POSITIONS_COLUMNS=$(echo "${EVIDENCE}" | jq -c '.positions_columns // []' 2>/dev/null || echo "[]")
+jq -n \
+    --arg decision "${DECISION}" \
+    --arg trades_count "${TRADES_COUNT}" \
+    --arg distinct_symbols_count "${SYMBOLS_COUNT}" \
+    --arg verification_sql_trades "${VERIFICATION_SQL_TRADES}" \
+    --arg verification_sql_symbols "${VERIFICATION_SQL_SYMBOLS}" \
+    --arg verification_sql_positions "${VERIFICATION_SQL_POSITIONS}" \
+    --argjson positions_columns "${POSITIONS_COLUMNS}" \
+    '{
+        decision: $decision,
+        trades_count: ($trades_count | tonumber),
+        distinct_symbols_count: ($distinct_symbols_count | tonumber),
+        positions_columns: $positions_columns,
+        verification_sql: {
+            trades_count: $verification_sql_trades,
+            distinct_symbols: $verification_sql_symbols,
+            positions_count: $verification_sql_positions
+        }
+    }' | jq .
 
 # 最終狀態檢查
 echo ""

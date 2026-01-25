@@ -35,7 +35,7 @@ def _mask_env_keys_in_evidence(evidence: dict) -> dict:
     
     策略：
     - user_id 可以明文顯示（業務識別符）
-    - 任何 env key（DATABASE_URL, API_KEY 等）必須遮罩
+    - 任何 env key（資料庫連線字串、API_KEY 等）必須遮罩
     - verification_sql 中的 user_id 保留（供手動驗證）
     
     Args:

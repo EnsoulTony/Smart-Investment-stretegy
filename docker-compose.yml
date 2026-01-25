@@ -34,17 +34,28 @@ services:
     build:
       context: .
       dockerfile: services/portfolio-service/Dockerfile
-    env_file:
-    - .env
     environment:
-      GOOGLE_SA_JSON: ${GOOGLE_SA_JSON}
+      GOOGLE_SA_JSON_PATH: /run/secrets/google_sa.json
       PORT: 8001
       SERVICE_NAME: portfolio-service
-      PORTFOLIO_DATABASE_URL: ${PORTFOLIO_DATABASE_URL:-postgresql://investment:investment@postgres:5432/investment_db}
+      DATABASE_URL: ${DATABASE_URL:-postgresql://investment:investment@postgres:5432/investment_db}
+      GOOGLE_SHEET_ID: ${GOOGLE_SHEET_ID}
+      GOOGLE_SHEET_TRADES_TAB: ${GOOGLE_SHEET_TRADES_TAB:-trades}
+      SHEET_COL_USER_ID: ${SHEET_COL_USER_ID:-user_id}
+      SHEET_COL_SYMBOL: ${SHEET_COL_SYMBOL:-symbol}
+      SHEET_COL_ASSET_CCY: ${SHEET_COL_ASSET_CCY:-asset_ccy}
+      SHEET_COL_SIDE: ${SHEET_COL_SIDE:-side}
+      SHEET_COL_QUANTITY: ${SHEET_COL_QUANTITY:-quantity}
+      SHEET_COL_PRICE: ${SHEET_COL_PRICE:-price}
+      SHEET_COL_FEE: ${SHEET_COL_FEE:-fee}
+      SHEET_COL_TRADE_DATE: ${SHEET_COL_TRADE_DATE:-trade_date}
+      SHEET_COL_BROKER: ${SHEET_COL_BROKER:-broker}
     depends_on:
     - postgres
     ports:
     - 8001:8001
+    volumes:
+    - ${GOOGLE_SA_JSON_PATH}:/run/secrets/google_sa.json:ro
     privileged: true
     security_opt:
     - apparmor:unconfined

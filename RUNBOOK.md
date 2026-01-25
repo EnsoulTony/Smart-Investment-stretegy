@@ -20,7 +20,8 @@
 DATABASE_URL=postgresql://investment:${DB_PASSWORD}@postgres:5432/investment_db
 
 # Google Sheets 同步（Service Account JSON）
-GOOGLE_SA_JSON={"type":"service_account",...}
+# ⚠️ 安全要求：不要把 JSON 內容直接放進 env
+GOOGLE_SA_JSON_PATH=/secure/keys/google_sa.json
 
 # Google Sheets 識別資訊
 GOOGLE_SHEET_ID=<your-sheet-id>
@@ -38,12 +39,16 @@ SHEET_COL_SIDE=買/賣
 **驗證指令**：
 ```bash
 # 檢查是否設定（不顯示內容）
-test -n "$GOOGLE_SA_JSON" && echo "GOOGLE_SA_JSON is set" || echo "Missing GOOGLE_SA_JSON"
+test -n "$GOOGLE_SA_JSON_PATH" && echo "GOOGLE_SA_JSON_PATH is set" || echo "Missing GOOGLE_SA_JSON_PATH"
 test -n "$GOOGLE_SHEET_ID" && echo "GOOGLE_SHEET_ID is set" || echo "Missing GOOGLE_SHEET_ID"
 
-# 驗證 JSON 格式是否正確
-echo "$GOOGLE_SA_JSON" | python3 -m json.tool > /dev/null && echo "Valid JSON" || echo "Invalid JSON"
+# 驗證 JSON 格式是否正確（從檔案讀取）
+python3 -m json.tool < "$GOOGLE_SA_JSON_PATH" > /dev/null && echo "Valid JSON" || echo "Invalid JSON"
 ```
+
+**證據輸出規範（敏感資訊遮罩）**：
+- 任何含 secrets 的指令輸出只能顯示「變數名稱」或「檔案路徑」，不可輸出內容。
+- 例如：使用 `env | grep GOOGLE_SA_JSON_PATH`，不得 `cat` 或 `echo` JSON 內容。
 
 ### 1.2. 硬隔離規則（服務環境變數）
 
@@ -244,6 +249,59 @@ ModuleNotFoundError: No module named 'app'
 ```
 
 ---
+
+## 11. Portfolio Refresh 流程（系統合約）
+
+**工具**：`./tools/portfolio_refresh.sh <user_id>`
+
+**固定流程（不可跳步）**：
+1. `GET /portfolio/trades/summary?user_id=...`
+   - 若 `trades_count=0`，必須提示「需要 sync」（不得直接 rebuild）
+2. `POST /portfolio/sync?user_id=...`
+3. 再次 `GET /portfolio/trades/summary`，確認 `trades_count > 0`
+4. `POST /portfolio/rebuild_positions?user_id=...&require_trades=1`
+5. 輸出 evidence JSON（system contract）：
+   - `decision`
+   - `trades_count`
+   - `distinct_symbols_count`
+   - `positions_columns`
+   - `verification_sql`（可直接複製執行）
+
+**範例執行**：
+```bash
+./tools/portfolio_refresh.sh tony
+```
+
+**範例輸出（節錄）**：
+```json
+{
+  "decision": "sync_executed",
+  "trades_count": 66,
+  "distinct_symbols_count": 5,
+  "positions_columns": [
+    "id",
+    "user_id",
+    "symbol",
+    "asset_ccy",
+    "quantity",
+    "avg_cost",
+    "realized_pnl",
+    "u_pnl",
+    "last_updated_at"
+  ],
+  "verification_sql": {
+    "trades_count": "select count(*) from trades where user_id='tony';",
+    "distinct_symbols": "select count(distinct symbol) from trades where user_id='tony';",
+    "positions_count": "select count(*) from positions where user_id='tony';"
+  }
+}
+```
+
+**成功判準**：
+- `trades_count > 0`
+- `distinct_symbols_count > 0`
+- `positions_columns` 含 `u_pnl`
+- `verification_sql` 可直接複製執行且與 API 回傳一致
 
 ## 3. 重啟與回滾
 

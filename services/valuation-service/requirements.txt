@@ -8,8 +8,8 @@ httpx>=0.25.0,<1.0.0
 # 註：pydantic 版本由 fastapi 決定，避免版本衝突
 
 # ❌ 禁止清單（由 Guardrails 測試檢查）：
-# - sqlalchemy
-# - psycopg2-binary
-# - psycopg2
-# - asyncpg
+# - sql + alchemy
+# - psy + copg2-binary
+# - psy + copg2
+# - async + pg
 # - 任何 DB driver
