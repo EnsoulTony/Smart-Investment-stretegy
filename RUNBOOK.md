@@ -50,6 +50,26 @@ python3 -m json.tool < "$GOOGLE_SA_JSON_PATH" > /dev/null && echo "Valid JSON" |
 - 任何含 secrets 的指令輸出只能顯示「變數名稱」或「檔案路徑」，不可輸出內容。
 - 例如：使用 `env | grep GOOGLE_SA_JSON_PATH`，不得 `cat` 或 `echo` JSON 內容。
 
+**google_sa.json 修改方式（不入 repo）**：
+1. 將 Service Account JSON 放在 VM 路徑（例：`/secure/keys/google_sa.json`）。
+2. 權限收斂（僅 root 可讀）：
+  ```bash
+  sudo chown root:root /secure/keys/google_sa.json
+  sudo chmod 600 /secure/keys/google_sa.json
+  ```
+3. 更新 `.env`：
+  ```bash
+  GOOGLE_SA_JSON_PATH=/secure/keys/google_sa.json
+  ```
+4. 重建服務讓掛載生效：
+  ```bash
+  docker compose up -d --build portfolio-service
+  ```
+5. 驗證（只顯示路徑，不顯示內容）：
+  ```bash
+  docker compose exec portfolio-service env | grep GOOGLE_SA_JSON_PATH
+  ```
+
 ### 1.2. 硬隔離規則（服務環境變數）
 
 - **任何服務容器不得持有超出職責範圍的敏感連線設定**。
