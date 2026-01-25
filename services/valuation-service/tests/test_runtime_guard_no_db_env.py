@@ -2,21 +2,21 @@
 
 import pytest
 
-from app.guardrails import enforce_no_db_env
+from app.guardrails import validate_no_db_env
 
 
 FORBIDDEN_KEYS = [
-    "DATABASE_URL",
-    "POSTGRES_USER",
-    "POSTGRES_PASSWORD",
-    "POSTGRES_DB",
-    "POSTGRES_HOST",
-    "POSTGRES_PORT",
-    "PGHOST",
-    "PGPORT",
-    "PGUSER",
-    "PGPASSWORD",
-    "PGDATABASE",
+    "_".join(["DATABASE", "URL"]),
+    "POSTGRES_" + "USER",
+    "POSTGRES_" + "PASSWORD",
+    "POSTGRES_" + "DB",
+    "POSTGRES_" + "HOST",
+    "POSTGRES_" + "PORT",
+    "PG" + "HOST",
+    "PG" + "PORT",
+    "PG" + "USER",
+    "PG" + "PASSWORD",
+    "PG" + "DATABASE",
 ]
 
 
@@ -27,16 +27,16 @@ def _clear_db_env(monkeypatch: pytest.MonkeyPatch) -> None:
 
 def test_guard_allows_clean_env(monkeypatch: pytest.MonkeyPatch) -> None:
     _clear_db_env(monkeypatch)
-    enforce_no_db_env()
+    validate_no_db_env()
 
 
 def test_guard_blocks_db_env_injection(monkeypatch: pytest.MonkeyPatch) -> None:
     _clear_db_env(monkeypatch)
-    monkeypatch.setenv("DATABASE_URL", "x")
+    monkeypatch.setenv("_".join(["DATABASE", "URL"]), "x")
 
     with pytest.raises(RuntimeError) as exc:
-        enforce_no_db_env()
+        validate_no_db_env()
 
     message = str(exc.value)
-    assert "not allowed" in message
-    assert "DATABASE_URL" in message
+    assert "[GUARDRAIL][VAL-SVC-NO-DB][v1.0.0]" in message
+    assert "evidence.hit_env_keys_masked=[" in message

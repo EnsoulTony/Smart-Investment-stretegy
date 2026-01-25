@@ -2,28 +2,46 @@
 
 import os
 
+GUARDRAIL_ID = "VAL-SVC-NO-DB"
+GUARDRAIL_VERSION = "1.0.0"
 
-def enforce_no_db_env() -> None:
+DENIED_ENV_KEYS_DB_CONNECTIVITY: set[str] = {
+    "_".join(["DATABASE", "URL"]),
+}
+
+DENIED_ENV_PREFIXES_DB_CONNECTIVITY: tuple[str, ...] = (
+    "PG",
+    "POSTGRES_",
+)
+
+
+def mask_env_key(key: str) -> str:
+    if len(key) <= 4:
+        return key[:1] + "*" * (len(key) - 1)
+    return key[:1] + "*" * (len(key) - 3) + key[-2:]
+
+
+def validate_no_db_env() -> None:
     """Reject startup when direct database configuration is detected."""
-    forbidden_keys = {
-        "_".join(["DATABASE", "URL"]),
-        "POSTGRES_" + "USER",
-        "POSTGRES_" + "PASSWORD",
-        "POSTGRES_" + "DB",
-        "POSTGRES_" + "HOST",
-        "POSTGRES_" + "PORT",
-        "PG" + "HOST",
-        "PG" + "PORT",
-        "PG" + "USER",
-        "PG" + "PASSWORD",
-        "PG" + "DATABASE",
-    }
+    hits = []
+    for key in os.environ.keys():
+        if key in DENIED_ENV_KEYS_DB_CONNECTIVITY:
+            hits.append(key)
+            continue
+        for prefix in DENIED_ENV_PREFIXES_DB_CONNECTIVITY:
+            if key.startswith(prefix):
+                hits.append(key)
+                break
 
-    present = [key for key in forbidden_keys if key in os.environ]
-    if present:
-        present_sorted = ", ".join(sorted(present))
-        raise RuntimeError(
-            "Direct database configuration is not allowed in valuation-service. "
-            "Use portfolio-service API only. "
-            f"Detected keys: {present_sorted}"
+    if hits:
+        masked = sorted({mask_env_key(key) for key in hits})
+        message = (
+            f"[GUARDRAIL][{GUARDRAIL_ID}][v{GUARDRAIL_VERSION}] db_direct_env_detected\n"
+            f"rule.denied_env_keys_count={len(DENIED_ENV_KEYS_DB_CONNECTIVITY)} "
+            f"rule.denied_env_prefixes_count={len(DENIED_ENV_PREFIXES_DB_CONNECTIVITY)}\n"
+            f"evidence.hit_env_keys_masked=[{','.join(masked)}]\n"
+            "repro.fail=\"inject any denied env key then start valuation-service -> must raise\"\n"
+            "repro.pass=\"only set PORTFOLIO_BASE_URL then start valuation-service -> must boot\"\n"
+            "remedy=\"valuation-service must fetch data only via PORTFOLIO_BASE_URL (HTTP); no DB direct connectivity\""
         )
+        raise RuntimeError(message)

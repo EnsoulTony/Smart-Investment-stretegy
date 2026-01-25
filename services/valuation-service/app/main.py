@@ -10,7 +10,7 @@ from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 
 from .portfolio_client import PortfolioClient
-from .guardrails import enforce_no_db_env
+from .guardrails import validate_no_db_env
 
 
 app = FastAPI(
@@ -20,7 +20,7 @@ app = FastAPI(
 )
 
 # 啟動時強制檢查：估值層不得持有 DB 連線設定
-enforce_no_db_env()
+validate_no_db_env()
 
 
 # ============================================================================
