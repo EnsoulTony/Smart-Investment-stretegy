@@ -117,7 +117,7 @@ echo "  matches_GOOGLE_SA_JSON: $MATCHES_JSON"
 MATCHES_KEY=$(echo "$COMPOSE_CONFIG_FULL" | grep -c "BEGIN PRIVATE KEY" || true)
 echo "  matches_BEGIN_PRIVATE_KEY: $MATCHES_KEY"
 
-if [ "$MATCHES_JSON" > 0 ] || [ "$MATCHES_KEY" > 0 ]; then
+if [ "$MATCHES_JSON" -gt 0 ] || [ "$MATCHES_KEY" -gt 0 ]; then
   echo ""
   echo "❌ Remediation:"
   echo "   - Use GOOGLE_SA_JSON_PATH instead of GOOGLE_SA_JSON"
