@@ -6,10 +6,13 @@
 
 1. `docker ps --format 'table {{.Names}}\t{{.Status}}'`（所有容器須為 healthy）
 2. `curl http://localhost:8000/health`（Gateway 探活）
-3. `curl http://localhost:8001/health` ~ `8004/health`（抽樣）
+3. `curl http://localhost:8001/health` ~ `8006/health`（抽樣，含 indicator-service 8006）
 4. `journalctl -u radar-deploy.timer -n 30`
 5. `docker compose exec postgres pg_isready`
 6. 檢查最新 `recommendations`、`news_signals` 是否更新（可透過 SQL 或 API）
+7. **Sprint 2 新增**：
+   - `curl http://localhost:8006/indicators/sector-rotation?symbols=XLU,XLK`（indicator-service）
+   - `curl "http://localhost:8002/radar/decision?user_id=tony"`（radar decision endpoint）
 
 ### 1.1. VM 環境變數配置檢查（Portfolio Service 相關）
 
@@ -75,6 +78,55 @@ python3 -m json.tool < "$GOOGLE_SA_JSON_PATH" > /dev/null && echo "Valid JSON" |
 - **任何服務容器不得持有超出職責範圍的敏感連線設定**。
 	- 例如：valuation-service **不得**持有 `DATABASE_URL` / `POSTGRES_*` 等 DB 連線資訊。
 	- 估值層只能透過 portfolio-service 的 HTTP API 取數。
+- **indicator-service**（Sprint 2）：
+	- 提供唯讀指標 API，不寫入任何 DB。
+	- 預設使用 stub provider（離線/CI 環境）。
+
+### 1.3. Sprint 2 驗收流程
+
+**自動化驗收腳本**
+
+```bash
+./tools/verify_sprint_2.sh
+```
+
+**腳本內容**：
+1. `./dc.sh up -d --build`
+2. 等待 indicator-service / radar-service 就緒
+3. 呼叫 indicator endpoint 確認 HTTP 200、content-type、required fields
+4. 呼叫 radar decision endpoint 確認 OutputSchema、`evidence.inputs_hash`、falsifiable triggers
+5. 容器內執行 pytest：
+   - `./dc.sh exec -T indicator-service pytest -q`
+   - `./dc.sh exec -T radar-service pytest -q`
+6. 輸出 `✅ Sprint 2 PASSED`
+
+**手動驗收指令**
+
+```bash
+# 1. 啟動服務
+./dc.sh up -d --build
+
+# 2. 測試 indicator-service
+curl http://localhost:8006/indicators/sector-rotation?symbols=XLU,XLK
+
+# 3. 測試 radar decision endpoint
+curl "http://localhost:8002/radar/decision?user_id=tony&base_ccy=TWD"
+
+# 4. 執行容器內測試
+./dc.sh exec -T indicator-service pytest -q
+./dc.sh exec -T radar-service pytest -q
+```
+
+**驗收標準**
+
+| 項目 | 要求 |
+| --- | --- |
+| indicator-service | HTTP 200, 含 XLU/XLK/ratio, slope5 存在 |
+| radar decision | OutputSchema 完整, evidence.inputs_hash 長度 64 |
+| falsifiable_triggers | actions 中每個 action 至少 1 個 trigger |
+| cooldown_days | 所有 actions 固定為 5 |
+| pytest (indicator) | 全部 PASSED |
+| pytest (radar) | 全部 PASSED |
 
 ## 2. 異常排查對照表
 

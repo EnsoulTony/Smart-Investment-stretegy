@@ -1,1 +1,2 @@
-# 針對 Radar Service 的額外依賴（目前預留，未使用）
+# Radar Service dependencies
+pydantic>=2.0.0

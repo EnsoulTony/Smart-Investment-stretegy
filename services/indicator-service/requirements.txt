@@ -1,0 +1,4 @@
+# Indicator Service dependencies
+pydantic>=2.0.0
+# Note: yfinance is optional, stub provider is default for CI/offline
+# yfinance>=0.2.0  # Uncomment for live data

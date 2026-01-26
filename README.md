@@ -50,9 +50,11 @@
 | Frontend | Vite + Vue 戰情室介面雛型，含 Vitest | 4173（對外 8080） |
 | api-gateway | FastAPI，統一前端入口、Auth、聚合資料 | 8000 |
 | portfolio-service | FastAPI，交易/持倉/均價法/快照 | 8001 |
-| radar-service | FastAPI，Radar v1.4 策略引擎（可抽換） | 8002 |
+| radar-service | FastAPI，Strategy Engine + v1.4 Plugin（決策建議） | 8002 |
 | news-service | FastAPI，新聞抓取/去重/中文摘要/重要性分數 | 8003 |
 | research-service | FastAPI，研究報告抓取（PDF）/抽字/本地摘要/手動匯入 | 8004 |
+| valuation-service | FastAPI，估值層（HTTP-only，禁止直連 DB） | 8005 |
+| indicator-service | FastAPI，市場指標（XLU/XLK sector rotation） | 8006 |
 | postgres | Postgres 16，持久化儲存 | 5432 |
 
 更完整架構、資料契約與邊界請見 [ARCHITECTURE.md](ARCHITECTURE.md)、[API_CONTRACTS.md](API_CONTRACTS.md)、[Strategy.md](Strategy.md)。
@@ -172,6 +174,27 @@ MVP 採用 VM 部署並支援 GitHub push 自動更新：
 
 ---
 
+## Sprints 開發進度
+
+| Sprint | 狀態 | 說明 | 驗收腳本 |
+| --- | --- | --- | --- |
+| Sprint 1 | ✅ 完成 | Portfolio 均價法、rebuild idempotency、preview/write hash 一致 | `tools/verify_sprint_1-4-b.sh` |
+| Sprint 2 | ✅ 完成 | Strategy Engine（可插拔）+ v1.4 plugin（EDS）+ indicator-service（XLU/XLK） | `tools/verify_sprint_2.sh` |
+
+### Sprint 2 新增功能
+
+- **Strategy Engine**：可插拔架構，固定 Input/Output Schema（詳見 [docs/sprints/sprint-2.md](docs/sprints/sprint-2.md)）
+- **v1.4 Plugin（EDS）**：計分制 mode 判定（RISK_ON/RISK_OFF/TRANSITION）、可證偽 triggers、5 日 cooldown
+- **indicator-service**：XLU/XLK 指標服務（port 8006），提供 `GET /indicators/sector-rotation`
+- **radar-service**：新增 `GET /radar/decision?user_id=tony&base_ccy=TWD` 決策端點
+
+驗收指令：
+```bash
+./tools/verify_sprint_2.sh
+```
+
+---
+
 ## 重要文件
 - [Strategy.md](Strategy.md)：Radar v1.4 規則、抽換邊界與指標定義
 - [Development.md](Development.md)：分階段 prompts、開發流程、一鍵命令模板
@@ -182,3 +205,4 @@ MVP 採用 VM 部署並支援 GitHub push 自動更新：
 - [TESTING.md](TESTING.md)：前後端測試策略與命令
 - [DEPLOYMENT.md](DEPLOYMENT.md)：VM 部署與自動更新
 - [CHANGELOG.md](CHANGELOG.md)：版本沿革與 MVP 里程碑
+- [docs/sprints/sprint-2.md](docs/sprints/sprint-2.md)：Sprint 2 完整規格與實作紀錄

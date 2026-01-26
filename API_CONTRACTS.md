@@ -211,7 +211,80 @@ GET /portfolio/trades/summary?user_id=user-uuid
 
 ## 3. radar-service
 
-### 輸入結構
+### `GET /radar/decision`（Sprint 2 新增）
+
+取得策略決策建議。整合 portfolio-service 持倉與 indicator-service 指標，透過 Strategy Engine 產出建議。
+
+**Request**
+```
+GET /radar/decision?user_id=tony&base_ccy=TWD&plugin=v1.4
+```
+
+| 參數 | 必填 | 預設 | 說明 |
+| --- | --- | --- | --- |
+| user_id | ✓ | - | 使用者 ID |
+| base_ccy | - | TWD | 報告幣別 |
+| plugin | - | v1.4 | 策略 plugin 名稱 |
+| as_of | - | today | 決策日期（YYYY-MM-DD） |
+
+**Response 200 OK（OutputSchema）**
+```json
+{
+  "schema_version": "1.0",
+  "as_of": "2025-01-20",
+  "user_id": "tony",
+  "mode": "RISK_ON",
+  "decision": "NO_ACTION",
+  "actions": [
+    {
+      "symbol": "TSLA",
+      "action": "HOLD",
+      "reason": "mode=RISK_ON, exposure within limits",
+      "constraints": { "cooldown_days": 5, "max_position_pct": 0.45 },
+      "falsifiable_triggers": [
+        { "type": "indicator", "name": "XLK/XLU", "condition": "cross_below_ma50", "value": 3.028 },
+        { "type": "indicator", "name": "ratio.slope5", "condition": "sign_flip_to_negative", "value": 0.002 }
+      ]
+    }
+  ],
+  "evidence": {
+    "engine": "strategy_engine",
+    "plugin": "v1.4",
+    "inputs_hash": "a1b2c3d4e5f6...",
+    "notes": ["mode=RISK_ON with balanced exposure"],
+    "scoring_detail": { "score_on": 5, "score_off": 0, "rules": {...}, "exposure": {...} }
+  }
+}
+```
+
+**必要欄位**
+
+| 欄位 | 說明 |
+| --- | --- |
+| `mode` | `RISK_ON` / `RISK_OFF` / `TRANSITION` |
+| `decision` | `NO_ACTION` / `REDUCE_RISK` / `REBALANCE` / `WATCHLIST` |
+| `evidence.inputs_hash` | canonical JSON SHA256（64 字元） |
+| `actions[].falsifiable_triggers` | 至少 1 個推翻條件 |
+| `actions[].constraints.cooldown_days` | 固定 5 天 |
+
+**Error 422 Unprocessable Entity**
+```json
+{ "detail": { "status": "invalid_request", "message": "Invalid date format" } }
+```
+
+**Error 502 Bad Gateway**
+```json
+{ "detail": { "status": "upstream_error", "service": "portfolio-service", "message": "..." } }
+```
+
+**Error 503 Service Unavailable**
+```json
+{ "detail": { "status": "missing_data", "missing_fields": ["indicators.sector_rotation.ratio.slope5"] } }
+```
+
+### Legacy 結構（保留相容）
+
+#### 輸入結構
 ```json
 {
   "positions": [...],
@@ -239,6 +312,63 @@ GET /portfolio/trades/summary?user_id=user-uuid
 | confidence | NUMERIC |
 | rationale | TEXT |
 | impact | JSONB （標記受影響的 symbols） |
+
+---
+
+## 3.5. indicator-service（Sprint 2 新增）
+
+### `GET /indicators/sector-rotation`
+
+取得 XLU/XLK sector rotation 指標。
+
+**Request**
+```
+GET /indicators/sector-rotation?symbols=XLU,XLK&as_of=2025-01-20
+```
+
+| 參數 | 必填 | 預設 | 說明 |
+| --- | --- | --- | --- |
+| symbols | - | XLU,XLK | 指標標的（目前僅支援 XLU,XLK） |
+| as_of | - | today | 指標日期（YYYY-MM-DD） |
+
+**Response 200 OK**
+```json
+{
+  "as_of": "2025-01-20",
+  "version": "0.1",
+  "source": "stub",
+  "XLU": { "close": 72.0, "ma20": 71.5, "ma50": 71.0 },
+  "XLK": { "close": 220.0, "ma20": 218.0, "ma50": 215.0 },
+  "ratio": {
+    "pair": "XLK/XLU",
+    "value": 3.055,
+    "ma20": 3.050,
+    "ma50": 3.028,
+    "slope5": 0.002,
+    "value_5d_ago": 3.045
+  }
+}
+```
+
+**必要欄位**
+
+| 區塊 | 欄位 |
+| --- | --- |
+| 頂層 | `as_of`, `version`, `source` |
+| XLU / XLK | `close`, `ma20`, `ma50` |
+| ratio | `pair`, `value`, `ma20`, `ma50`, `slope5` |
+
+**Error 422**
+```json
+{ "detail": { "status": "invalid_request", "missing_fields": ["symbols.XLU"] } }
+```
+
+**Error 503**
+```json
+{ "detail": { "status": "provider_error", "message": "..." } }
+```
+
+---
 
 ## 4. news-service
 
@@ -285,3 +415,13 @@ GET /portfolio/trades/summary?user_id=user-uuid
 2. 開 Issue / PR 標記「breaking-change」。
 3. 更新對應測試與 mock 資料。
 4. 通知前端與資料團隊，確認無相依問題。
+
+---
+
+**Sprint 2 更新日期：2026-01-26**
+
+**變更摘要：**
+- 新增 `GET /radar/decision` endpoint 規格
+- 新增 `GET /indicators/sector-rotation` endpoint 規格
+- 定義 422/502/503 錯誤回應格式
+- 說明 OutputSchema 必要欄位（inputs_hash, falsifiable_triggers, cooldown）
