@@ -15,13 +15,15 @@ echo ""
 
 # 0. 啟動服務
 echo "[0/5] 啟動服務..."
-docker compose up -d postgres portfolio-service api-gateway
+./dc.sh up -d postgres portfolio-service api-gateway valuation-service
 sleep 5
 
 # 等待服務就緒
 echo "[1/5] 等待服務就緒..."
 timeout 60 bash -c 'until curl -sf http://localhost:8001/health > /dev/null; do sleep 2; done'
 echo "✅ Portfolio service 就緒"
+timeout 60 bash -c 'until curl -sf http://localhost:8005/health > /dev/null; do sleep 2; done'
+echo "✅ Valuation service 就緒"
 
 # 1. 執行 pr_check.sh（允許 secrets check 誤判）
 echo ""
@@ -34,7 +36,7 @@ else
     echo "檢查是否為 secrets leak guard 誤判..."
     
     # 如果是 secrets check 誤判（實際上沒有洩漏），繼續執行
-    if docker compose config | grep -qE "GOOGLE_SA_JSON:|BEGIN PRIVATE KEY"; then
+    if ./dc.sh config | grep -qE "GOOGLE_SA_JSON:|BEGIN PRIVATE KEY"; then
         echo "❌ 確實發現 secrets 洩漏，中止驗收"
         exit 1
     else
@@ -143,15 +145,22 @@ echo ""
 
 # 1. 啟動服務
 echo "[1/7] 啟動服務..."
-docker compose up -d --build valuation-service portfolio-service postgres
+./dc.sh up -d --build valuation-service portfolio-service postgres
 
 # 2. 等待資料庫就緒
 echo "[2/7] 等待資料庫就緒..."
-docker compose exec -T postgres sh -c 'until pg_isready -U investment; do sleep 1; done'
+./dc.sh exec -T postgres sh -c 'until pg_isready -U investment; do sleep 1; done'
 
 # 3. 執行 migration
 echo "[3/7] 執行資料庫 migration..."
-docker compose exec -T portfolio-service alembic upgrade head
+./dc.sh exec -T portfolio-service alembic upgrade head
+
+# 3.5. 等待 HTTP 服務就緒
+echo "等待 HTTP 服務就緒..."
+timeout 60 bash -c 'until curl -sf http://localhost:8001/health > /dev/null; do sleep 2; done'
+echo "✅ Portfolio service 就緒"
+timeout 60 bash -c 'until curl -sf http://localhost:8005/health > /dev/null; do sleep 2; done'
+echo "✅ Valuation service 就緒"
 
 # 4. 同步測試資料
 echo "[4/7] 同步測試資料..."
@@ -239,7 +248,7 @@ fi
 echo ""
 echo "[7/7] Runtime Guard 注入測試..."
 set +e  # 允許指令失敗
-docker compose run --rm -e DATABASE_URL=postgresql://x:y@z:5432/db valuation-service \
+./dc.sh run --rm -e DATABASE_URL=postgresql://x:y@z:5432/db valuation-service \
   python -c "from app.guardrails import check_and_exit; check_and_exit()" \
   >/tmp/guard_output.txt 2>&1
 GUARD_EXIT=$?
@@ -283,7 +292,7 @@ echo "  6. 前置條件檢查（HTTP 409 + JSON）"
 echo "  7. Runtime Guard 阻斷 DB env"
 echo ""
 echo "建議執行完整測試："
-echo "  docker compose exec -T valuation-service pytest -q"
-echo "  docker compose exec -T portfolio-service pytest -q"
+echo "  ./dc.sh exec -T valuation-service pytest -q"
+echo "  ./dc.sh exec -T portfolio-service pytest -q"
 echo "  ./tools/pr_check.sh"
 echo ""
