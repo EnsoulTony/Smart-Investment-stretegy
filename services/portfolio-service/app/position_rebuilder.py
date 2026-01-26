@@ -17,11 +17,13 @@
 """
 
 import logging
+import hashlib
+import json
 from sqlalchemy.orm import Session
 from typing import Dict, List
 from decimal import Decimal
 from collections import defaultdict
-from datetime import datetime, timezone
+from datetime import datetime, timezone, date
 from uuid import uuid4
 
 from app.schemas import TradeRecord
@@ -29,6 +31,41 @@ from app.avg_cost_calculator import compute_avg_cost
 from app.trades_repository import list_trades_for_user
 
 logger = logging.getLogger(__name__)
+
+
+def compute_positions_hash(positions: List[Dict]) -> str:
+    """計算 positions 的穩定 hash（用於驗證 preview 與 write 的一致性）。
+    
+    Args:
+        positions: positions 列表，每個 position 包含: symbol, asset_ccy, quantity, avg_cost, realized_pnl, u_pnl
+    
+    Returns:
+        str: SHA256 hash (hex)
+    
+    規格：
+    - 按 symbol 排序（避免順序差異）
+    - 只取固定欄位：symbol, asset_ccy, quantity, avg_cost, realized_pnl, u_pnl
+    - 數字轉為 canonical string（避免 Decimal/float 差異）
+    - 不包含 last_updated_at（避免時間戳差異）
+    """
+    if not positions:
+        return hashlib.sha256(b"").hexdigest()
+    
+    # 排序與正規化
+    normalized = []
+    for pos in sorted(positions, key=lambda p: (p.get("symbol", ""), p.get("asset_ccy", ""))):
+        normalized.append({
+            "symbol": pos.get("symbol", ""),
+            "asset_ccy": pos.get("asset_ccy", ""),
+            "quantity": str(pos.get("quantity", "0")),
+            "avg_cost": str(pos.get("avg_cost", "0")),
+            "realized_pnl": str(pos.get("realized_pnl", "0")),
+            "u_pnl": str(pos.get("u_pnl", "0"))
+        })
+    
+    # 計算 hash
+    canonical_json = json.dumps(normalized, sort_keys=True, ensure_ascii=False)
+    return hashlib.sha256(canonical_json.encode("utf-8")).hexdigest()
 
 
 class PositionRebuilder:
@@ -111,47 +148,78 @@ class PositionRebuilder:
                 logger.error("Fail Fast 驗證失敗，user_id=%s, errors_count=%d", user_id, len(validation_errors))
                 raise ValueError(error_msg)
 
-            # 開始 transaction
+            # 開始 transaction：DELETE + INSERT (idempotent)
             upserted_count = 0
             deleted_or_zeroed_count = 0
             run_id = str(uuid4())
 
             try:
                 from app.models import Position
+                from sqlalchemy import delete
 
+                # Step 1: 刪除該 user 的所有 positions（覆蓋語意）
+                delete_stmt = delete(Position).where(Position.user_id == user_id)
+                result = self.session.execute(delete_stmt)
+                deleted_count = result.rowcount
+                logger.info("已刪除 user 的舊 positions, user_id=%s, deleted_count=%d", user_id, deleted_count)
+
+                # Step 2: 計算新 positions 並批次插入
+                positions_to_insert = []
                 for (symbol, asset_ccy), trades in grouped_trades.items():
                     state = compute_avg_cost(trades)
 
+                    # 若 qty=0，不插入（已在 Step 1 刪除）
                     if state.qty == 0:
-                        existing_position = self.session.query(Position).filter_by(
-                            user_id=user_id,
-                            symbol=symbol,
-                            asset_ccy=asset_ccy
-                        ).first()
-                        if existing_position:
-                            self.session.delete(existing_position)
-                            logger.debug("刪除已清空持倉,symbol=%s, asset_ccy=%s", symbol, asset_ccy)
-
                         deleted_or_zeroed_count += 1
                         continue
 
-                    position = Position(
-                        user_id=user_id,
-                        symbol=symbol,
-                        asset_ccy=asset_ccy,
-                        quantity=state.qty,
-                        avg_cost=state.avg_cost,
-                        realized_pnl=state.realized_pnl,
-                        u_pnl=Decimal("0"),
-                        last_updated_at=datetime.now(timezone.utc)
-                    )
-                    self.session.merge(position)
-                    upserted_count += 1
+                    positions_to_insert.append({
+                        "user_id": user_id,
+                        "symbol": symbol,
+                        "asset_ccy": asset_ccy,
+                        "quantity": state.qty,
+                        "avg_cost": state.avg_cost,
+                        "realized_pnl": state.realized_pnl,
+                        "u_pnl": Decimal("0"),
+                        "last_updated_at": datetime.now(timezone.utc)
+                    })
+
+                # Step 3: bulk insert
+                if positions_to_insert:
+                    self.session.bulk_insert_mappings(Position, positions_to_insert)
+                    upserted_count = len(positions_to_insert)
+                    logger.info("已插入新 positions, user_id=%s, inserted_count=%d", user_id, upserted_count)
 
                 self.session.commit()
 
+                # 計算 positions_hash
+                positions_for_hash = [
+                    {
+                        "symbol": p["symbol"],
+                        "asset_ccy": p["asset_ccy"],
+                        "quantity": p["quantity"],
+                        "avg_cost": p["avg_cost"],
+                        "realized_pnl": p["realized_pnl"],
+                        "u_pnl": p["u_pnl"]
+                    }
+                    for p in positions_to_insert
+                ]
+                positions_hash = compute_positions_hash(positions_for_hash)
+
+                # 獲取當前日期
+                as_of = date.today().isoformat()
+
                 evidence = {
                     "run_id": run_id,
+                    "decision": "proceed",
+                    "as_of": as_of,
+                    "precondition_snapshot": {
+                        "trades_count": len(trades_orm),
+                        "distinct_symbols_count": len(grouped_trades)
+                    },
+                    "positions_count": upserted_count,
+                    "positions_hash": positions_hash,
+                    "deleted_count": deleted_count,
                     "positions_columns": list(Position.__table__.columns.keys())
                 }
 
@@ -162,6 +230,7 @@ class PositionRebuilder:
                     "upserted_count": upserted_count,
                     "deleted_or_zeroed_count": deleted_or_zeroed_count,
                     "run_id": run_id,
+                    "positions_hash": positions_hash,
                     "evidence": evidence,
                 }
 

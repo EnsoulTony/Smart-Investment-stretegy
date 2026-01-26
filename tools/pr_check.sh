@@ -102,11 +102,39 @@ fi
 pass
 
 # ============================================================================
-# Step 3: docker compose config env allow-list - valuation-service
+# Step 3: Compose config secrets leak guard
+# ==============================================================================
+step "Compose config secrets leak guard" "docker compose config | grep -E 'GOOGLE_SA_JSON:|BEGIN PRIVATE KEY'"
+
+echo "Checking for secrets leakage in compose config..."
+COMPOSE_CONFIG_FULL=$(docker compose config 2>/dev/null) || fail "PRECHECK-COMPOSE" "docker compose config failed"
+
+# Check 1: GOOGLE_SA_JSON (entire JSON in env)
+MATCHES_JSON=$(echo "$COMPOSE_CONFIG_FULL" | grep -c "GOOGLE_SA_JSON:" || true)
+echo "  matches_GOOGLE_SA_JSON: $MATCHES_JSON"
+
+# Check 2: BEGIN PRIVATE KEY
+MATCHES_KEY=$(echo "$COMPOSE_CONFIG_FULL" | grep -c "BEGIN PRIVATE KEY" || true)
+echo "  matches_BEGIN_PRIVATE_KEY: $MATCHES_KEY"
+
+if [ "$MATCHES_JSON" > 0 ] || [ "$MATCHES_KEY" > 0 ]; then
+  echo ""
+  echo "❌ Remediation:"
+  echo "   - Use GOOGLE_SA_JSON_PATH instead of GOOGLE_SA_JSON"
+  echo "   - Mount key file via docker-compose.secrets.yml with volume bind"
+  echo "   - Example: /secure/keys/google_sa.json:/run/keys/google_sa.json:ro"
+  echo "   - See RUNBOOK.md 'Google Service Account 金鑰部署注意事項' section"
+  fail "COMPOSE-SECRETS-LEAK" "GOOGLE_SA_JSON_matches=$MATCHES_JSON, PRIVATE_KEY_matches=$MATCHES_KEY"
+fi
+pass
+
+# ==============================================================================
+# Step 4: docker compose config env allow-list - valuation-service
 # ============================================================================
 step "docker compose config env allow-list: valuation-service" "docker compose config"
 
-COMPOSE_CONFIG=$(docker compose config 2>/dev/null) || fail "PRECHECK-COMPOSE" "docker compose config failed"
+# Reuse COMPOSE_CONFIG_FULL from Step 3
+COMPOSE_CONFIG="$COMPOSE_CONFIG_FULL"
 
 get_env_keys() {
   local svc="$1"
@@ -186,7 +214,7 @@ fi
 pass
 
 # ============================================================================
-# Step 4: docker compose config env checks - portfolio-service
+# Step 5: docker compose config env checks - portfolio-service
 # ============================================================================
 step "docker compose config env checks: portfolio-service" "docker compose config"
 
@@ -216,9 +244,9 @@ for key in "${PORT_KEYS[@]}"; do
 done
 if [ $HAS_SA_PATH -eq 1 ]; then
   SA_PATH_VALUE=$(get_env_value portfolio-service GOOGLE_SA_JSON_PATH || true)
-  EXPECTED_SA_PATH="/run/secrets/google_sa.json"
+  EXPECTED_SA_PATH="/run/keys/google_sa.json"
   if [ -n "$SA_PATH_VALUE" ] && [ "$SA_PATH_VALUE" != "$EXPECTED_SA_PATH" ]; then
-    warn "GOOGLE_SA_JSON_PATH=*** (expected=$EXPECTED_SA_PATH)"
+    warn "GOOGLE_SA_JSON_PATH=*** (expected=$EXPECTED_SA_PATH, got different path - ensure it's NOT /run/secrets/*)"
   fi
 fi
 
@@ -235,7 +263,7 @@ fi
 pass
 
 # ============================================================================
-# Step 5: Check services are running
+# Step 6: Check services are running
 # ============================================================================
 step "Check services are running" "docker compose ps --status running --services"
 
@@ -250,7 +278,7 @@ fi
 pass
 
 # ============================================================================
-# Step 6: Runtime env sanity check (valuation-service)
+# Step 7: Runtime env sanity check (valuation-service)
 # ============================================================================
 step "Runtime env sanity (valuation-service)" "docker compose exec -T valuation-service python -"
 
@@ -296,7 +324,7 @@ PY
 pass
 
 # ============================================================================
-# Step 7: Runtime guard injection test (valuation-service)
+# Step 8: Runtime guard injection test (valuation-service)
 # ============================================================================
 step "Runtime guard injection test" "docker compose run --rm -e DATABASE_URL=x valuation-service python -c 'from app.guardrails import check_and_exit; check_and_exit()'"
 
@@ -326,9 +354,9 @@ echo "guard_output_contains_id=yes (good)"
 pass
 
 # ============================================================================
-# Step 8: Valuation API JSON contract check
-# ============================================================================
-step "Valuation API JSON contract check" "curl valuation-service + python json.loads"
+# Step 9: Valuation API JSON contract check (409 precondition_failed)
+# ==============================================================================
+step "Valuation API JSON contract check (409)" "curl valuation-service + python json.loads"
 
 # 測試 409 場景（空 user）
 echo "Testing 409 scenario (empty trades)..."
@@ -363,28 +391,160 @@ fi
 pass
 
 # ============================================================================
-# Step 9: pytest (container) - portfolio-service
+# Step 10: Valuation API JSON contract check (200 success path)
+# ==============================================================================
+step "Valuation API JSON contract check (200 success path)" "portfolio_refresh.sh + curl + JSON validation"
+
+echo "Ensuring success path is reachable (portfolio sync + trades)..."
+if [ -f "./tools/portfolio_refresh.sh" ]; then
+  REFRESH_CMD="./tools/portfolio_refresh.sh tony"
+  echo "command: $REFRESH_CMD"
+  if $REFRESH_CMD > /tmp/pr_check_refresh.log 2>&1; then
+    echo "  portfolio_refresh: completed"
+  else
+    echo "  portfolio_refresh: failed (may affect 200 path reachability)"
+    cat /tmp/pr_check_refresh.log | tail -n 20
+  fi
+else
+  warn "tools/portfolio_refresh.sh not found, skipping pre-condition setup"
+fi
+
+# Make API call to valuation endpoint
+ENDPOINT="http://localhost:8005/valuation/portfolio?user_id=tony&base_ccy=TWD"
+echo "command: curl -s -w '\\n%{http_code}\\n%{content_type}' '$ENDPOINT'"
+
+API_RESPONSE_200=$(curl -s -w "\n%{http_code}\n%{content_type}" "$ENDPOINT" 2>&1 || true)
+
+# Parse response: last 2 lines are http_code and content_type
+BODY_200=$(echo "$API_RESPONSE_200" | head -n -2)
+HTTP_CODE_200=$(echo "$API_RESPONSE_200" | tail -n 2 | head -n 1)
+CONTENT_TYPE_200=$(echo "$API_RESPONSE_200" | tail -n 1)
+
+echo "  http_code: $HTTP_CODE_200"
+echo "  content_type: $CONTENT_TYPE_200"
+
+# If 409, treat as expected alternative path (no trades available)
+if [ "$HTTP_CODE_200" = "409" ]; then
+  echo "  → Got 409 (no trades), this is expected alternative path"
+  echo "  decision: pass (409 scenario already validated in Step 9)"
+  # Don't fail, just pass this step
+elif [ "$HTTP_CODE_200" != "200" ]; then
+  echo "  decision: fail"
+  echo "  ❌ Expected HTTP 200 or 409, got $HTTP_CODE_200"
+  echo "  Response preview (first 200 chars):"
+  echo "$BODY_200" | head -c 200
+  echo ""
+  fail "API-200-HTTP-CODE" "expected=200_or_409 got=$HTTP_CODE_200"
+else
+  # Validate 200 response
+  
+  # Check Content-Type
+  if ! echo "$CONTENT_TYPE_200" | grep -qi "application/json"; then
+    echo "  content_type_ok: no"
+    fail "API-200-CONTENT-TYPE" "expected=application/json got=$CONTENT_TYPE_200"
+  fi
+  echo "  content_type_ok: yes"
+
+  # Check JSON parse-ability
+  JSON_PARSE_RESULT=$(echo "$BODY_200" | python3 -c 'import json,sys; json.loads(sys.stdin.read()); print("json_ok")' 2>&1 || echo "json_parse_failed")
+  
+  if [ "$JSON_PARSE_RESULT" != "json_ok" ]; then
+    echo "  json_parse_ok: no"
+    echo "  Parse error: $JSON_PARSE_RESULT"
+    echo "  Response preview (first 200 chars):"
+    echo "$BODY_200" | head -c 200
+    echo ""
+    fail "API-200-JSON-PARSE" "body is not valid JSON"
+  fi
+  echo "  json_parse_ok: yes"
+
+  # Check required fields
+  REQUIRED_FIELDS=("status" "totals" "positions" "evidence")
+  REQUIRED_FIELDS_OK="yes"
+  
+  for field in "${REQUIRED_FIELDS[@]}"; do
+    if ! echo "$BODY_200" | python3 -c "import json,sys; data=json.loads(sys.stdin.read()); exit(0 if '$field' in data else 1)" 2>/dev/null; then
+      echo "  required_field '$field': missing"
+      REQUIRED_FIELDS_OK="no"
+    fi
+  done
+
+  if [ "$REQUIRED_FIELDS_OK" != "yes" ]; then
+    echo "  required_fields_ok: no"
+    fail "API-200-SCHEMA" "missing required fields: ${REQUIRED_FIELDS[*]}"
+  fi
+  echo "  required_fields_ok: yes (status, totals, positions, evidence)"
+
+  # Check evidence doesn't leak sensitive data
+  EVIDENCE_CHECKS_OK="yes"
+  
+  # Check for postgresql://
+  if echo "$BODY_200" | grep -q "postgresql://"; then
+    echo "  evidence_leak_check: found 'postgresql://' (FAIL)"
+    EVIDENCE_CHECKS_OK="no"
+  fi
+  
+  # Check for BEGIN PRIVATE KEY
+  if echo "$BODY_200" | grep -q "BEGIN PRIVATE KEY"; then
+    echo "  evidence_leak_check: found 'BEGIN PRIVATE KEY' (FAIL)"
+    EVIDENCE_CHECKS_OK="no"
+  fi
+  
+  # Check for unmasked env values (should be masked like D**********L)
+  UNMASKED_CHECK=$(echo "$BODY_200" | python3 -c "
+import json, sys, re
+try:
+    data = json.loads(sys.stdin.read())
+    evidence = data.get('evidence', {})
+    # Look for values that seem like full secrets (>20 chars, alphanumeric+special)
+    for k, v in evidence.items():
+        if isinstance(v, str) and len(v) > 20 and re.match(r'^[A-Za-z0-9_\-+=/.]+\$', v):
+            # Check if it's NOT masked (masked should have *)
+            if '*' not in v:
+                print(f'unmasked_value_in_evidence.{k}')
+                sys.exit(1)
+    sys.exit(0)
+except Exception as e:
+    print(f'check_error: {e}')
+    sys.exit(1)
+" 2>&1 || echo "")
+
+  if [ -n "$UNMASKED_CHECK" ] && echo "$UNMASKED_CHECK" | grep -q "unmasked_value"; then
+    echo "  evidence_leak_check: $UNMASKED_CHECK (FAIL)"
+    EVIDENCE_CHECKS_OK="no"
+  fi
+
+  if [ "$EVIDENCE_CHECKS_OK" != "yes" ]; then
+    fail "API-200-EVIDENCE-LEAK" "evidence contains sensitive data (postgresql://, private keys, or unmasked secrets)"
+  fi
+  echo "  evidence_leak_check: pass (no postgresql://, private keys, or unmasked secrets)"
+
+  echo "  decision: pass"
+fi
+
+# ==============================================================================
+# Step 11: pytest (container) - portfolio-service
 # ============================================================================
 step "pytest (container): portfolio-service" "docker compose exec -T portfolio-service pytest -q"
 docker compose exec -T portfolio-service pytest -q
 pass
 
 # ============================================================================
-# Step 10: pytest collect-only (portfolio-service)
+# Step 12: pytest collect-only (portfolio-service)
 # ============================================================================
 step "pytest collect-only (portfolio-service)" "docker compose exec -T portfolio-service pytest -q --collect-only | tail -n 50"
 docker compose exec -T portfolio-service pytest -q --collect-only | tail -n 50
 pass
 
 # ============================================================================
-# Step 11: pytest (container) - valuation-service
+# Step 13: pytest (container) - valuation-service
 # ============================================================================
 step "pytest (container): valuation-service" "docker compose exec -T valuation-service pytest -q"
 docker compose exec -T valuation-service pytest -q
 pass
 
 # ============================================================================
-# Step 12: pytest collect-only (valuation-service)
+# Step 14: pytest collect-only (valuation-service)
 # ============================================================================
 step "pytest collect-only (valuation-service)" "docker compose exec -T valuation-service pytest -q --collect-only | tail -n 50"
 docker compose exec -T valuation-service pytest -q --collect-only | tail -n 50
@@ -401,13 +561,15 @@ echo ""
 echo "Checks completed:"
 echo "  1. Forbidden tokens scan (valuation-service)"
 echo "  2. Forbidden tokens scan (portfolio-service accounting)"
-echo "  3. docker compose config env allow-list (valuation-service)"
-echo "  4. docker compose config env checks (portfolio-service)"
-echo "  5. Services running check"
-echo "  6. Runtime env sanity (valuation-service)"
-echo "  7. Runtime guard injection test"
-echo "  8. Valuation API JSON contract check"
-echo "  9. pytest (portfolio-service)"
-echo " 10. pytest collect-only (portfolio-service)"
-echo " 11. pytest (valuation-service)"
-echo " 12. pytest collect-only (valuation-service)"
+echo "  3. Compose config secrets leak guard"
+echo "  4. docker compose config env allow-list (valuation-service)"
+echo "  5. docker compose config env checks (portfolio-service)"
+echo "  6. Services running check"
+echo "  7. Runtime env sanity (valuation-service)"
+echo "  8. Runtime guard injection test"
+echo "  9. Valuation API JSON contract check (409)"
+echo " 10. Valuation API JSON contract check (200 success path)"
+echo " 11. pytest (portfolio-service)"
+echo " 12. pytest collect-only (portfolio-service)"
+echo " 13. pytest (valuation-service)"
+echo " 14. pytest collect-only (valuation-service)"

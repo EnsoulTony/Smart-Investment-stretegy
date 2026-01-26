@@ -11,11 +11,16 @@ from .schemas import RebuildPositionsRequest, RebuildPositionsResponse, Position
 
 from app.db import get_db, engine
 from app.sync_service import SyncService
-from app.position_rebuilder import PositionRebuilder, preview_rebuild
+from app.position_rebuilder import PositionRebuilder, compute_positions_hash
 from app.schemas import RebuildPositionsRequest, RebuildPositionsResponse
 from app.repositories.positions_repository import list_positions_for_user
-from app.trades_repository import count_trades_for_user, count_distinct_symbols_for_user
+from app.trades_repository import count_trades_for_user, count_distinct_symbols_for_user, list_trades_for_user
 from app.models import Trade
+from app.schemas import TradeRecord
+from app.avg_cost_calculator import compute_avg_cost
+from collections import defaultdict
+from decimal import Decimal
+from datetime import date
 
 SERVICE_NAME = os.getenv("SERVICE_NAME", "portfolio-service")
 
@@ -294,9 +299,10 @@ def rebuild_positions(
         )
 
 
-@app.post("/portfolio/rebuild_positions/preview", tags=["portfolio"])
+@app.get("/portfolio/rebuild_positions/preview", tags=["portfolio"])
 def preview_rebuild_positions(
-    request: RebuildPositionsRequest,
+    user_id: str = Query(..., description="使用者 ID"),
+    require_trades: bool = Query(False, description="是否強制要求 trades 表有資料（預設 false 保持相容）"),
     db: Session = Depends(get_db)
 ) -> dict:
     """預覽持倉重算結果（不寫入 DB）。
@@ -308,7 +314,7 @@ def preview_rebuild_positions(
     
     與 POST /portfolio/rebuild_positions 的差異：
     - preview: 只計算不寫入，回傳詳細資料供檢視
-    - rebuild: 計算後寫入 positions 表（Sprint 1-4.3 實作）
+    - rebuild: 計算後寫入 positions 表
     
     使用場景：
     - 用戶想查看重算結果但不實際執行
@@ -316,14 +322,20 @@ def preview_rebuild_positions(
     - 前端顯示預覽畫面
     
     Args:
-        request: 包含 user_id 的請求 body
+        user_id: 使用者 ID（Query 參數）
+        require_trades: 是否強制要求 trades 表有資料（預設 false）
         db: SQLAlchemy Session（依賴注入）
     
     Returns:
         dict: 預覽結果
-            - status: "succeeded" 或 "failed"
+            - status: "preview" 或 "precondition_failed"
             - user_id: 使用者 ID
-            - symbols: 持倉列表
+            - require_trades: 是否強制要求 trades
+            - trades_count: 交易筆數
+            - distinct_symbols_count: 不重複標的數量
+            - computed_positions_count: 計算後的 positions 數量
+            - computed_positions_hash: positions 的 SHA256 hash
+            - positions: 持倉列表
               [{
                 "symbol": 股票代碼,
                 "asset_ccy": 幣別,
@@ -333,33 +345,87 @@ def preview_rebuild_positions(
                 "total_fee": 累計手續費,
                 "trades_count": 交易筆數
               }]
-            - warnings: 警告訊息列表（計算失敗的標的）
+            - evidence: 可證偽證據
     
     Raises:
         HTTPException:
-            - 422: user_id 缺失或格式錯誤（Pydantic 自動驗證）
+            - 409: require_trades=true 且 trades_count=0
+            - 422: user_id 缺失或格式錯誤
             - 500: 預覽過程發生錯誤
     
     Notes:
-        - TODO: 加入身份驗證（JWT/API Key）
-        - 當前階段（Sprint 1-4.2）實作預覽功能
-        - 下階段（Sprint 1-4.3）實作實際寫入
+        - Sprint 1-4.B: 實作 preview + rebuild idempotent
     """
     try:
-        result = preview_rebuild(user_id=request.user_id, db=db)
+        if not user_id or not user_id.strip():
+            raise HTTPException(status_code=422, detail="user_id must not be empty")
+        
+        # 前置條件檢查：若 require_trades=true 且 trades_count=0，回傳 409
+        trades_count = count_trades_for_user(db, user_id)
+        distinct_symbols_count = count_distinct_symbols_for_user(db, user_id)
+        
+        if require_trades and trades_count == 0:
+            evidence = {
+                "require_trades": True,
+                "decision": "blocked",
+                "trades_count": trades_count,
+                "distinct_symbols_count": distinct_symbols_count,
+                "verification_sql": {
+                    "trades_count": f"select count(*) from trades where user_id='{user_id}';",
+                    "distinct_symbols": f"select count(distinct symbol) from trades where user_id='{user_id}';"
+                }
+            }
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "status": "precondition_failed",
+                    "user_id": user_id,
+                    "require_trades": require_trades,
+                    "trades_count": 0,
+                    "computed_positions_count": 0,
+                    "computed_positions_hash": "",
+                    "evidence": evidence,
+                    "message": "前置條件不滿足：該用戶在 trades 表無交易記錄，無法執行 rebuild_positions（require_trades=true）"
+                }
+            )
+        
+        result = preview_rebuild(user_id=user_id, db=db)
+        
+        # 補充 require_trades 和 trades 計數
+        result["require_trades"] = require_trades
+        result["trades_count"] = trades_count
+        result["distinct_symbols_count"] = distinct_symbols_count
+        
+        # 補充 verification_sql
+        if "evidence" not in result:
+            result["evidence"] = {}
+        result["evidence"]["require_trades"] = require_trades
+        result["evidence"]["decision"] = "proceed"
+        result["evidence"]["precondition_snapshot"] = {
+            "trades_count": trades_count,
+            "distinct_symbols_count": distinct_symbols_count
+        }
+        result["evidence"]["verification_sql"] = {
+            "trades_count": f"select count(*) from trades where user_id='{user_id}';",
+            "distinct_symbols": f"select count(distinct symbol) from trades where user_id='{user_id}';",
+            "positions_count": "N/A (preview mode, no DB write)"
+        }
+        
         return result
         
+    except HTTPException:
+        raise
     except ValueError as e:
         # 驗證錯誤（例如：user_id 為空）
-        logger.warning("預覽重算驗證失敗，user_id=%s, error=%s", request.user_id, e)
+        logger.warning("預覽重算驗證失敗，user_id=%s, error=%s", user_id, e)
         raise HTTPException(
-            status_code=500,
+            status_code=422,
             detail=str(e)
         )
         
     except Exception as e:
         # 其他錯誤（DB 連線失敗、計算錯誤等）
-        logger.exception("預覽重算失敗，user_id=%s", request.user_id)
+        logger.exception("預覽重算失敗，user_id=%s", user_id)
         raise HTTPException(
             status_code=500,
             detail=f"預覽重算失敗：{str(e)}"
