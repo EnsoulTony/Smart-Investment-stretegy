@@ -73,6 +73,21 @@ services:
     security_opt:
     - apparmor:unconfined
     - seccomp:unconfined
+  indicator-service:
+    build:
+      context: .
+      dockerfile: services/indicator-service/Dockerfile
+    environment:
+      PORT: 8006
+      SERVICE_NAME: indicator-service
+      INDICATOR_PROVIDER: stub
+      INDICATOR_SCENARIO: default
+    ports:
+    - 8006:8006
+    privileged: true
+    security_opt:
+    - apparmor:unconfined
+    - seccomp:unconfined
   radar-service:
     build:
       context: .
@@ -81,8 +96,12 @@ services:
       PORT: 8002
       SERVICE_NAME: radar-service
       DATABASE_URL: ${DATABASE_URL:-postgresql://investment:investment@postgres:5432/investment_db}
+      PORTFOLIO_BASE_URL: http://portfolio-service:8001
+      INDICATOR_BASE_URL: http://indicator-service:8006
     depends_on:
     - postgres
+    - portfolio-service
+    - indicator-service
     ports:
     - 8002:8002
     privileged: true

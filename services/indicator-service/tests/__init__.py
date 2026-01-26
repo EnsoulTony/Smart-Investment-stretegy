@@ -1,0 +1,1 @@
+"""Indicator Service tests."""
