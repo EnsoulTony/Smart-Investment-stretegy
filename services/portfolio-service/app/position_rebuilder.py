@@ -361,6 +361,10 @@ def preview_rebuild(user_id: str, db: Session) -> Dict:
             try:
                 state = compute_avg_cost(group_trades)
 
+                # 若 qty=0，不計入（與 write 路徑一致）
+                if state.qty == 0:
+                    continue
+
                 # For hash calculation, use precise Decimal values
                 positions_for_hash_calc.append({
                     "symbol": symbol,
@@ -368,7 +372,7 @@ def preview_rebuild(user_id: str, db: Session) -> Dict:
                     "quantity": state.qty,
                     "avg_cost": state.avg_cost,
                     "realized_pnl": state.realized_pnl,
-                    "u_pnl": 0
+                    "u_pnl": Decimal("0")
                 })
 
                 # For JSON response, convert Decimals to floats

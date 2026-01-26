@@ -87,7 +87,7 @@ echo "[5/5] 測試 preview 與 write hash 一致..."
 echo "Preview:"
 PREVIEW_RESULT=$(curl -s "http://localhost:8001/portfolio/rebuild_positions/preview?user_id=tony&require_trades=1")
 PREVIEW_STATUS=$(echo "$PREVIEW_RESULT" | jq -r '.status')
-PREVIEW_HASH=$(echo "$PREVIEW_RESULT" | jq -r '.computed_positions_hash')
+PREVIEW_HASH=$(echo "$PREVIEW_RESULT" | jq -r '.positions_hash')
 echo "  status: $PREVIEW_STATUS"
 echo "  hash: $PREVIEW_HASH"
 
