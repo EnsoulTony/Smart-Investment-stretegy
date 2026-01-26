@@ -1,8 +1,8 @@
 # CI Gate 說明文件
-
+test
 本文件說明 CI Gate 的設計目的、運作方式、本地測試流程，以及常見問題排除。
 
-## 1. CI Gate 在做什麼（Why）
+## 1. CI Gate 在做什麼（Why） 
 
 CI Gate 是本專案的自動化品質關卡，確保每個 PR 在合併前都經過完整驗證：test
 
