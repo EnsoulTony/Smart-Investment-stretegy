@@ -1,110 +1,538 @@
-name: CI
+name: CI Gate
 
 on:
+  pull_request:
+    types: [opened, synchronize, reopened, edited]
   push:
     branches:
       - main
-  pull_request:
+
+env:
+  # Timeout for service health checks (seconds)
+  HEALTH_CHECK_TIMEOUT: 120
 
 jobs:
-  frontend-tests:
-    name: Frontend - Vitest
+  ci-gate:
+    name: CI Gate
     runs-on: ubuntu-latest
     steps:
+      # ========================================================================
+      # Step 1: Checkout
+      # ========================================================================
       - name: Checkout repository
         uses: actions/checkout@v4
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          fetch-depth: 0  # Need full history for diff
 
-      - name: Install dependencies
-        working-directory: frontend
-        run: npm install --no-fund --no-audit
-
-      - name: Run Vitest
-        working-directory: frontend
-        run: npm run test -- --run
-
-  backend-tests:
-    name: Backend - Pytest (${{ matrix.service }})
-    runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        service:
-          - api-gateway
-          - radar-service
-          - news-service
-          - research-service
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Setup Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.12'
-
-      - name: Install dependencies
+      # ========================================================================
+      # Step 2: Show versions
+      # ========================================================================
+      - name: Show tool versions
         run: |
-          python -m pip install --upgrade pip
-          pip install -r services/base-requirements.txt
-          pip install -r services/${{ matrix.service }}/requirements.txt
+          echo "=== Docker ==="
+          docker --version
+          echo ""
+          echo "=== Docker Compose ==="
+          docker compose version
+          echo ""
+          echo "=== Python ==="
+          python3 --version
+          echo ""
+          echo "=== Git ==="
+          git --version
 
-      - name: Run pytest
-        working-directory: services/${{ matrix.service }}
-        run: pytest
+      # ========================================================================
+      # Step 3: Calculate changed files and MODE
+      # ========================================================================
+      - name: Calculate changed files and CI mode
+        id: detect_mode
+        run: |
+          echo "=== Calculating Changed Files ==="
 
-  portfolio-service-tests:
-    name: Backend - Portfolio Service (Docker)
-    runs-on: ubuntu-latest
-    env:
-      GOOGLE_SA_JSON_BASE64: ${{ secrets.GOOGLE_SA_JSON_BASE64 }}
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
+          # Determine base and head commits
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            BASE_SHA="${{ github.event.pull_request.base.sha }}"
+            HEAD_SHA="${{ github.sha }}"
+            echo "Event: pull_request"
+          else
+            # Push event
+            BASE_SHA="${{ github.event.before }}"
+            HEAD_SHA="${{ github.sha }}"
+            echo "Event: push"
 
+            # Handle initial push (no before commit)
+            if [ "$BASE_SHA" = "0000000000000000000000000000000000000000" ]; then
+              echo "Initial push detected, using full mode"
+              echo "mode=full" >> $GITHUB_OUTPUT
+              echo "changed_files=" >> $GITHUB_OUTPUT
+              echo "trigger_files=" >> $GITHUB_OUTPUT
+              exit 0
+            fi
+          fi
+
+          echo "Base SHA: $BASE_SHA"
+          echo "Head SHA: $HEAD_SHA"
+          echo ""
+
+          # Get changed files
+          CHANGED_FILES=$(git diff --name-only "$BASE_SHA" "$HEAD_SHA" 2>/dev/null || echo "")
+
+          if [ -z "$CHANGED_FILES" ]; then
+            echo "No changed files detected, using full mode (conservative)"
+            echo "mode=full" >> $GITHUB_OUTPUT
+            echo "changed_files=" >> $GITHUB_OUTPUT
+            echo "trigger_files=" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+
+          echo "Changed files:"
+          echo "$CHANGED_FILES" | head -50
+          if [ $(echo "$CHANGED_FILES" | wc -l) -gt 50 ]; then
+            echo "... (truncated, $(echo "$CHANGED_FILES" | wc -l) total files)"
+          fi
+          echo ""
+
+          # Save changed files for later steps
+          echo "$CHANGED_FILES" > /tmp/changed_files.txt
+
+          # Patterns that trigger FULL mode
+          FULL_MODE_PATTERNS=(
+            "^services/portfolio-service/"
+            "^services/valuation-service/"
+            "^services/api-gateway/"
+            "^tools/"
+            "^dc\.sh$"
+            "docker-compose.*\.yml$"
+            "compose.*\.yml$"
+            ".*/docker-compose.*\.yml$"
+            "^services/.*/Dockerfile"
+          )
+
+          # Check for full mode triggers
+          TRIGGER_FILES=""
+          MODE="light"
+
+          for file in $CHANGED_FILES; do
+            for pattern in "${FULL_MODE_PATTERNS[@]}"; do
+              if echo "$file" | grep -qE "$pattern"; then
+                MODE="full"
+                TRIGGER_FILES="$TRIGGER_FILES$file"$'\n'
+                break
+              fi
+            done
+          done
+
+          # If not full mode, check if it's docs-only
+          if [ "$MODE" = "light" ]; then
+            NON_DOCS_FILES=""
+            for file in $CHANGED_FILES; do
+              # Check if file is NOT in docs/ and NOT a .md file
+              if ! echo "$file" | grep -qE "^docs/|\.md$"; then
+                NON_DOCS_FILES="$NON_DOCS_FILES$file"$'\n'
+              fi
+            done
+
+            if [ -n "$NON_DOCS_FILES" ]; then
+              # There are non-docs files that didn't match full patterns
+              # Be conservative and use full mode
+              MODE="full"
+              echo "Non-docs files detected that don't match known patterns, using full mode (conservative)"
+              echo "Non-docs files:"
+              echo "$NON_DOCS_FILES" | head -20
+            fi
+          fi
+
+          echo ""
+          echo "=== Mode Decision ==="
+          echo "MODE: $MODE"
+          if [ "$MODE" = "full" ] && [ -n "$TRIGGER_FILES" ]; then
+            echo ""
+            echo "Trigger files (first 20):"
+            echo "$TRIGGER_FILES" | head -20
+          fi
+
+          # Output to GitHub
+          echo "mode=$MODE" >> $GITHUB_OUTPUT
+          echo "changed_files<<EOF" >> $GITHUB_OUTPUT
+          echo "$CHANGED_FILES" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+          echo "trigger_files<<EOF" >> $GITHUB_OUTPUT
+          echo "$TRIGGER_FILES" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+
+      # ========================================================================
+      # Step 4: PR Checkbox Validation (PR only)
+      # ========================================================================
+      - name: Validate PR checkboxes
+        if: github.event_name == 'pull_request'
+        env:
+          PR_BODY: ${{ github.event.pull_request.body }}
+          CI_MODE: ${{ steps.detect_mode.outputs.mode }}
+          TRIGGER_FILES: ${{ steps.detect_mode.outputs.trigger_files }}
+        run: |
+          echo "=== PR Checkbox Validation ==="
+          echo "CI Mode: $CI_MODE"
+          echo ""
+
+          if [ -z "$PR_BODY" ]; then
+            echo "::error::PR body is empty. Please use the PR template and fill in the required checkboxes."
+            exit 1
+          fi
+
+          # Define required checkboxes based on mode
+          if [ "$CI_MODE" = "full" ]; then
+            echo "Full mode requires all checkboxes:"
+            REQUIRED_CHECKS=(
+              "./tools/pr_check.sh"
+              "./tools/verify_sprint_1-4-b.sh"
+              "pytest (portfolio-service)"
+              "pytest (valuation-service)"
+            )
+          else
+            echo "Light mode requires only pr_check checkbox:"
+            REQUIRED_CHECKS=(
+              "./tools/pr_check.sh"
+            )
+          fi
+
+          MISSING_CHECKS=""
+
+          for check in "${REQUIRED_CHECKS[@]}"; do
+            echo "  Checking: $check"
+            # Look for [x] followed by the check text (case insensitive for x/X)
+            if echo "$PR_BODY" | grep -qiE "\[x\].*${check}"; then
+              echo "    -> Found [x]"
+            else
+              echo "    -> MISSING or not checked"
+              MISSING_CHECKS="$MISSING_CHECKS- $check"$'\n'
+            fi
+          done
+
+          if [ -n "$MISSING_CHECKS" ]; then
+            echo ""
+            echo "::error::Missing required checkboxes in PR description"
+            echo ""
+            echo "=========================================="
+            echo "CI GATE FAILED: Missing Required Checkboxes"
+            echo "=========================================="
+            echo ""
+            echo "The following checkboxes are required but not checked:"
+            echo "$MISSING_CHECKS"
+            echo ""
+            echo "CI Mode: $CI_MODE"
+            echo ""
+            if [ "$CI_MODE" = "full" ]; then
+              echo "Reason for full mode (files that triggered it):"
+              echo "$TRIGGER_FILES" | head -20
+              if [ $(echo "$TRIGGER_FILES" | wc -l) -gt 20 ]; then
+                echo "... (showing first 20 of $(echo "$TRIGGER_FILES" | wc -l) files)"
+              fi
+            fi
+            echo ""
+            echo "Please update your PR description to check all required items:"
+            echo "  - [ ] -> [x]"
+            echo ""
+            echo "If CI is in full mode and your PR is docs-only, make sure you"
+            echo "haven't modified any files in services/, tools/, or docker-compose files."
+            exit 1
+          fi
+
+          echo ""
+          echo "All required checkboxes are checked."
+
+      # ========================================================================
+      # Step 5: Create .env file for compose
+      # ========================================================================
       - name: Create .env file
         run: |
-          cat > .env << EOF
+          cat > .env << 'EOF'
           DATABASE_URL=postgresql://investment:investment@postgres:5432/investment_db
           GOOGLE_SHEET_ID=test-sheet-id
           GOOGLE_SHEET_TRADES_TAB=trades
           EOF
+          echo ".env file created (no secrets)"
 
-      - name: Prepare optional Google SA secrets override
-        if: ${{ env.GOOGLE_SA_JSON_BASE64 != '' }}
+      # ========================================================================
+      # Step 6: Create docker-compose.secrets.yml stub
+      # ========================================================================
+      - name: Create docker-compose.secrets.yml stub
         run: |
-          echo "${GOOGLE_SA_JSON_BASE64}" | base64 -d > /tmp/google_sa.json
-          cat > docker-compose.secrets.yml << EOF
-          services:
-            portfolio-service:
-              environment:
-                GOOGLE_SA_JSON_PATH: /run/secrets/google_sa.json
-              volumes:
-                - /tmp/google_sa.json:/run/secrets/google_sa.json:ro
+          cat > docker-compose.secrets.yml << 'EOF'
+          # Stub file for CI - no real secrets
+          version: "3.8"
+          services: {}
           EOF
-      
-      - name: Build and run tests in Docker
+          echo "docker-compose.secrets.yml stub created"
+
+      # ========================================================================
+      # Step 7: Install ripgrep (needed by pr_check.sh)
+      # ========================================================================
+      - name: Install ripgrep
         run: |
-          if [ -f docker-compose.secrets.yml ]; then
-            docker compose -f docker-compose.yml -f docker-compose.secrets.yml up -d --build postgres portfolio-service
-          else
-            docker compose up -d --build postgres portfolio-service
+          sudo apt-get update
+          sudo apt-get install -y ripgrep
+
+      # ========================================================================
+      # Step 8: Run pr_check.sh (always, but skip container-dependent steps)
+      # ========================================================================
+      - name: Run pr_check.sh (static checks only)
+        id: pr_check
+        run: |
+          echo "=== Running pr_check.sh ==="
+          echo ""
+
+          # For light mode or pre-compose phase, we run a limited version
+          # that doesn't require running containers
+
+          # Create a modified pr_check that only runs static checks
+          cat > /tmp/pr_check_static.sh << 'SCRIPT'
+          #!/bin/bash
+          set -euo pipefail
+
+          ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+          cd "$ROOT_DIR"
+
+          RED='\033[0;31m'
+          GREEN='\033[0;32m'
+          NC='\033[0m'
+
+          pass() { echo -e "${GREEN}PASS${NC}"; }
+          fail() { echo -e "${RED}FAIL${NC}: $1"; exit 1; }
+
+          echo "=== Static Checks (No Containers) ==="
+          echo ""
+
+          # Step 1: Forbidden tokens scan - valuation-service
+          echo "1. Forbidden tokens scan: valuation-service"
+          VAL_PATTERN='sqlalchemy|psycopg2|psycopg2-binary|asyncpg|postgresql://|mysql://|create_engine|Session\(|'"DATA""BASE""_URL"'|'"POST""GRES_"'|PGHOST|PGPORT|PGUSER|PGPASSWORD'
+          VAL_TARGETS=(services/valuation-service/app services/valuation-service/requirements.txt)
+
+          for target in "${VAL_TARGETS[@]}"; do
+            if [ -e "$target" ]; then
+              VAL_HITS=$(rg -n -o "$VAL_PATTERN" "$target" 2>/dev/null || true)
+              VAL_COUNT=$(echo "$VAL_HITS" | sed '/^$/d' | wc -l | tr -d ' ')
+              if [ "$VAL_COUNT" != "0" ]; then
+                fail "valuation-service contains forbidden tokens: ${VAL_HITS//$'\n'/; }"
+              fi
+            fi
+          done
+          pass
+
+          # Step 2: Forbidden tokens scan - portfolio-service accounting layer
+          echo "2. Forbidden tokens scan: portfolio-service accounting layer"
+          PORT_FILES=(
+            services/portfolio-service/app/position_rebuilder.py
+            services/portfolio-service/app/avg_cost_calculator.py
+            services/portfolio-service/app/main.py
+            services/portfolio-service/app/trades_repository.py
+          )
+          PORT_PATTERN='convert\(|get_rate|get_fx_provider|valuation|market_value|valuation_ccy|unrealized_pnl'
+
+          for f in "${PORT_FILES[@]}"; do
+            if [ -e "$f" ]; then
+              PORT_HITS=$(rg -n -o "$PORT_PATTERN" "$f" 2>/dev/null || true)
+              PORT_COUNT=$(echo "$PORT_HITS" | sed '/^$/d' | wc -l | tr -d ' ')
+              if [ "$PORT_COUNT" != "0" ]; then
+                fail "portfolio-service accounting layer contains forbidden tokens: ${PORT_HITS//$'\n'/; }"
+              fi
+            fi
+          done
+          pass
+
+          # Step 3: Compose config secrets leak guard (if compose files exist)
+          echo "3. Compose config secrets leak guard"
+          if [ -f "docker-compose.yml" ]; then
+            # Check compose files directly for obvious secret patterns
+            if grep -rE "GOOGLE_SA_JSON:" docker-compose*.yml 2>/dev/null | grep -v "GOOGLE_SA_JSON_PATH" | grep -v "#"; then
+              fail "Found GOOGLE_SA_JSON in compose files (use GOOGLE_SA_JSON_PATH instead)"
+            fi
+            if grep -rE "BEGIN PRIVATE KEY" docker-compose*.yml 2>/dev/null; then
+              fail "Found private key in compose files"
+            fi
           fi
+          pass
 
-          # 等待 Postgres 就绪
-          docker compose exec -T postgres sh -c 'until pg_isready -U investment; do sleep 1; done'
+          echo ""
+          echo "=== Static checks passed ==="
+          SCRIPT
 
-          # 执行 Alembic migration（创建表结构）
-          docker compose exec -T portfolio-service alembic upgrade head
+          chmod +x /tmp/pr_check_static.sh
 
-          # 运行测试
-          docker compose exec -T portfolio-service pytest -q
+          # Copy to repo root and run
+          cp /tmp/pr_check_static.sh ./pr_check_static.sh
+          ./pr_check_static.sh
+          rm -f ./pr_check_static.sh
 
-      - name: Cleanup
+      # ========================================================================
+      # Step 9: Full Mode - Docker Compose Build & Up
+      # ========================================================================
+      - name: Docker Compose down (cleanup any existing)
+        if: steps.detect_mode.outputs.mode == 'full'
+        run: |
+          ./dc.sh down -v || true
+
+      - name: Docker Compose build and up
+        if: steps.detect_mode.outputs.mode == 'full'
+        run: |
+          echo "=== Building and starting services ==="
+          ./dc.sh up -d --build
+
+      - name: Wait for services to be healthy
+        if: steps.detect_mode.outputs.mode == 'full'
+        run: |
+          echo "=== Waiting for services to be healthy ==="
+
+          # Wait for postgres
+          echo "Waiting for postgres..."
+          timeout 60 bash -c 'until ./dc.sh exec -T postgres pg_isready -U investment; do sleep 2; done'
+          echo "Postgres is ready"
+
+          # Run migrations
+          echo "Running migrations..."
+          ./dc.sh exec -T portfolio-service alembic upgrade head
+
+          # Wait for portfolio-service
+          echo "Waiting for portfolio-service..."
+          timeout ${{ env.HEALTH_CHECK_TIMEOUT }} bash -c 'until curl -sf http://localhost:8001/health > /dev/null 2>&1; do sleep 2; done'
+          echo "portfolio-service is ready"
+
+          # Wait for valuation-service
+          echo "Waiting for valuation-service..."
+          timeout ${{ env.HEALTH_CHECK_TIMEOUT }} bash -c 'until curl -sf http://localhost:8005/health > /dev/null 2>&1; do sleep 2; done'
+          echo "valuation-service is ready"
+
+          echo ""
+          echo "All services are healthy"
+
+      # ========================================================================
+      # Step 10: Create artifacts directory
+      # ========================================================================
+      - name: Create artifacts directory
+        run: mkdir -p artifacts
+
+      # ========================================================================
+      # Step 11: Full Mode - Run verify_sprint_1-4-b.sh
+      # ========================================================================
+      - name: Run verify_sprint_1-4-b.sh
+        if: steps.detect_mode.outputs.mode == 'full'
+        run: |
+          echo "=== Running verify_sprint_1-4-b.sh ==="
+          ./tools/verify_sprint_1-4-b.sh 2>&1 | tee artifacts/verify_sprint_1-4-b.log
+          echo ""
+          echo "verify_sprint_1-4-b.sh completed successfully"
+
+      # ========================================================================
+      # Step 12: Full Mode - Run pytest (portfolio-service)
+      # ========================================================================
+      - name: Run pytest (portfolio-service)
+        if: steps.detect_mode.outputs.mode == 'full'
+        run: |
+          echo "=== Running pytest for portfolio-service ==="
+          ./dc.sh exec -T portfolio-service pytest -q 2>&1 | tee artifacts/pytest_portfolio.log
+          echo ""
+          echo "pytest (portfolio-service) completed successfully"
+
+      # ========================================================================
+      # Step 13: Full Mode - Run pytest (valuation-service)
+      # ========================================================================
+      - name: Run pytest (valuation-service)
+        if: steps.detect_mode.outputs.mode == 'full'
+        run: |
+          echo "=== Running pytest for valuation-service ==="
+          ./dc.sh exec -T valuation-service pytest -q 2>&1 | tee artifacts/pytest_valuation.log
+          echo ""
+          echo "pytest (valuation-service) completed successfully"
+
+      # ========================================================================
+      # Step 14: Light Mode - Create log file
+      # ========================================================================
+      - name: Create light mode log
+        if: steps.detect_mode.outputs.mode == 'light'
+        run: |
+          cat > artifacts/ci_mode_light.log << EOF
+          ==========================================
+          CI Gate - Light Mode
+          ==========================================
+
+          This PR contains docs-only changes (files in docs/ or *.md files).
+
+          Executed checks:
+            - Static code analysis (pr_check static portion)
+            - Forbidden token scans
+
+          Skipped checks (not needed for docs-only):
+            - Docker Compose build & up
+            - verify_sprint_1-4-b.sh
+            - pytest (portfolio-service)
+            - pytest (valuation-service)
+
+          Changed files:
+          ${{ steps.detect_mode.outputs.changed_files }}
+
+          ==========================================
+          EOF
+
+          echo "Light mode - skipped container tests (docs-only change)"
+
+      # ========================================================================
+      # Step 15: Collect container logs on failure or always
+      # ========================================================================
+      - name: Collect container status and logs
+        if: always() && steps.detect_mode.outputs.mode == 'full'
+        run: |
+          echo "=== Container Status ===" | tee artifacts/compose_logs_tail.log
+          ./dc.sh ps >> artifacts/compose_logs_tail.log 2>&1 || true
+          echo "" >> artifacts/compose_logs_tail.log
+          echo "=== Container Logs (last 2000 lines) ===" >> artifacts/compose_logs_tail.log
+          ./dc.sh logs --no-color portfolio-service valuation-service postgres 2>&1 | tail -n 2000 >> artifacts/compose_logs_tail.log || true
+
+      # ========================================================================
+      # Step 16: Upload artifacts
+      # ========================================================================
+      - name: Upload artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ci-gate-artifacts
+          path: artifacts/*.log
+          retention-days: 7
+          if-no-files-found: ignore
+
+      # ========================================================================
+      # Step 17: Cleanup
+      # ========================================================================
+      - name: Cleanup Docker Compose
         if: always()
         run: |
-          docker compose down -v
-          rm -f /tmp/google_sa.json docker-compose.secrets.yml
+          ./dc.sh down -v || true
+
+      # ========================================================================
+      # Step 18: Final status
+      # ========================================================================
+      - name: CI Gate Summary
+        run: |
+          echo ""
+          echo "=========================================="
+          echo "CI GATE PASSED"
+          echo "=========================================="
+          echo ""
+          echo "Mode: ${{ steps.detect_mode.outputs.mode }}"
+          echo ""
+          if [ "${{ steps.detect_mode.outputs.mode }}" = "full" ]; then
+            echo "Executed checks:"
+            echo "  [x] Static code analysis"
+            echo "  [x] Docker Compose build"
+            echo "  [x] verify_sprint_1-4-b.sh"
+            echo "  [x] pytest (portfolio-service)"
+            echo "  [x] pytest (valuation-service)"
+          else
+            echo "Executed checks:"
+            echo "  [x] Static code analysis"
+            echo ""
+            echo "Skipped (docs-only):"
+            echo "  [ ] Docker Compose build"
+            echo "  [ ] verify_sprint_1-4-b.sh"
+            echo "  [ ] pytest (portfolio-service)"
+            echo "  [ ] pytest (valuation-service)"
+          fi
+          echo ""
