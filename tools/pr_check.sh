@@ -496,8 +496,12 @@ import json, sys, re
 try:
     data = json.loads(sys.stdin.read())
     evidence = data.get('evidence', {})
+    # Allowed non-sensitive fields (hashes, public identifiers)
+    ALLOWED_FIELDS = {'positions_hash', 'decision', 'positions_count', 'as_of'}
     # Look for values that seem like full secrets (>20 chars, alphanumeric+special)
     for k, v in evidence.items():
+        if k in ALLOWED_FIELDS:
+            continue  # Skip known non-sensitive fields
         if isinstance(v, str) and len(v) > 20 and re.match(r'^[A-Za-z0-9_\-+=/.]+\$', v):
             # Check if it's NOT masked (masked should have *)
             if '*' not in v:

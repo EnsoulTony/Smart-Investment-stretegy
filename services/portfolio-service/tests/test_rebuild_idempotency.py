@@ -14,6 +14,22 @@ from datetime import date, timedelta
 
 from app.models import Trade, Position
 
+from app.main import app, get_db
+
+
+@pytest.fixture
+def client(db_session):
+    """FastAPI TestClient with database session dependency override."""
+    def override_get_db():
+        try:
+            yield db_session
+        finally:
+            pass
+    
+    app.dependency_overrides[get_db] = override_get_db
+    yield TestClient(app)
+    app.dependency_overrides.clear()
+
 
 def test_rebuild_positions_overwrite_existing_positions_no_unique_violation(
     client: TestClient,
@@ -38,28 +54,24 @@ def test_rebuild_positions_overwrite_existing_positions_no_unique_violation(
             user_id=user_id,
             symbol="AAPL",
             asset_ccy="USD",
-            action="BUY",
-            side="buy",
+            side="BUY",
             quantity=Decimal("100"),
             price=Decimal("150.00"),
             fee=Decimal("1.00"),
             trade_date=date.today() - timedelta(days=10),
             broker="IB",
-            source="test",
             source_hash=f"test_hash_aapl_1"
         ),
         Trade(
             user_id=user_id,
             symbol="TSLA",
             asset_ccy="USD",
-            action="BUY",
-            side="buy",
+            side="BUY",
             quantity=Decimal("50"),
             price=Decimal("200.00"),
             fee=Decimal("0.50"),
             trade_date=date.today() - timedelta(days=5),
             broker="IB",
-            source="test",
             source_hash=f"test_hash_tsla_1"
         )
     ]
@@ -130,14 +142,12 @@ def test_preview_and_write_hash_consistency(
             user_id=user_id,
             symbol="GOOGL",
             asset_ccy="USD",
-            action="BUY",
-            side="buy",
+            side="BUY",
             quantity=Decimal("30"),
             price=Decimal("2800.00"),
             fee=Decimal("2.00"),
             trade_date=date.today() - timedelta(days=3),
             broker="IB",
-            source="test",
             source_hash=f"test_hash_googl_1"
         )
     ]

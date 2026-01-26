@@ -59,16 +59,15 @@ class TestRebuildPositionsPreview:
     
     def test_preview_endpoint_exists(self, client):
         """測試：端點存在且可回應。
-        
+
         驗證：
         - HTTP status code = 200
         - 回應為 JSON 格式
         """
-        response = client.post(
-            "/portfolio/rebuild_positions/preview",
-            json={"user_id": "test_user"}
+        response = client.get(
+            "/portfolio/rebuild_positions/preview?user_id=test_user"
         )
-        
+
         assert response.status_code == 200, f"預期 200，實際：{response.status_code}"
         assert response.headers["content-type"] == "application/json"
     
@@ -80,10 +79,8 @@ class TestRebuildPositionsPreview:
         - symbols = []（空列表）
         - warnings = []
         """
-        response = client.post(
-            "/portfolio/rebuild_positions/preview",
-            json={"user_id": "user_with_no_trades"}
-        )
+        response = client.get(
+            "/portfolio/rebuild_positions/preview?user_id=user_with_no_trades"
         
         data = response.json()
         
@@ -127,10 +124,8 @@ class TestRebuildPositionsPreview:
         assert count == 1, f"插入失敗或 rollback 太早，預期 1 筆 trade，實際：{count}"
         
         # 呼叫 API
-        response = client.post(
-            "/portfolio/rebuild_positions/preview",
-            json={"user_id": "test_user_1"}
-        )
+        response = client.get(
+            "/portfolio/rebuild_positions/preview?user_id=test_user_1"
         
         data = response.json()
         
@@ -198,10 +193,8 @@ class TestRebuildPositionsPreview:
         assert count == 2, f"插入失敗或 rollback 太早，預期 2 筆 trade，實際：{count}"
         
         # 呼叫 API
-        response = client.post(
-            "/portfolio/rebuild_positions/preview",
-            json={"user_id": "test_user_2"}
-        )
+        response = client.get(
+            "/portfolio/rebuild_positions/preview?user_id=test_user_2"
         
         data = response.json()
         
@@ -273,10 +266,8 @@ class TestRebuildPositionsPreview:
         assert count == 3, f"插入失敗或 rollback 太早，預期 3 筆 trade，實際：{count}"
         
         # 呼叫 API
-        response = client.post(
-            "/portfolio/rebuild_positions/preview",
-            json={"user_id": "test_user_3"}
-        )
+        response = client.get(
+            "/portfolio/rebuild_positions/preview?user_id=test_user_3"
         
         data = response.json()
         
@@ -314,10 +305,8 @@ class TestRebuildPositionsPreview:
         db_session.commit()
         
         # 呼叫 API
-        response = client.post(
-            "/portfolio/rebuild_positions/preview",
-            json={"user_id": "test_user_4"}
-        )
+        response = client.get(
+            "/portfolio/rebuild_positions/preview?user_id=test_user_4"
         
         data = response.json()
         
@@ -352,14 +341,13 @@ class TestRebuildPositionsPreview:
     
     def test_preview_missing_user_id_returns_422(self, client):
         """測試：缺少 user_id 時回傳 422。
-        
+
         驗證 Pydantic validation contract。
         """
-        response = client.post(
-            "/portfolio/rebuild_positions/preview",
-            json={}  # 缺少 user_id
+        response = client.get(
+            "/portfolio/rebuild_positions/preview"  # 缺少 user_id query param
         )
-        
+
         assert response.status_code == 422
         error_detail = response.json()
         assert "detail" in error_detail
