@@ -164,19 +164,19 @@ echo "✅ Valuation service 就緒"
 
 # 4. 同步測試資料
 echo "[4/7] 同步測試資料..."
-./tools/portfolio_refresh.sh test_e2e 2>/dev/null || echo "Warning: portfolio_refresh may have warnings"
+./tools/portfolio_refresh.sh tony 2>/dev/null || echo "Warning: portfolio_refresh may have warnings"
 
 # 5. 測試估值 API（正常情況）
 echo ""
 echo "[5/7] 測試估值 API（正常情況：HTTP 200）..."
 HTTP_CODE=$(curl -s -o /tmp/val_response.json -w "%{http_code}" \
-  "http://localhost:8005/valuation/portfolio?user_id=test_e2e&base_ccy=USD")
+  "http://localhost:8005/valuation/portfolio?user_id=tony&base_ccy=USD")
 
 if [ "$HTTP_CODE" == "200" ]; then
   echo "✅ HTTP 200 OK"
   
   # 驗證 content-type（從實際響應）
-  CONTENT_TYPE=$(curl -s -i "http://localhost:8005/valuation/portfolio?user_id=test_e2e&base_ccy=USD" | grep -i "content-type" | head -n 1)
+  CONTENT_TYPE=$(curl -s -i "http://localhost:8005/valuation/portfolio?user_id=tony&base_ccy=USD" | grep -i "content-type" | head -n 1)
   echo "   Content-Type: $CONTENT_TYPE"
   
   # 驗證 JSON 可解析
