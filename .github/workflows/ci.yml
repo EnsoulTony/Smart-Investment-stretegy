@@ -85,7 +85,7 @@ jobs:
               volumes:
                 - /tmp/google_sa.json:/run/secrets/google_sa.json:ro
           EOF
-
+      
       - name: Build and run tests in Docker
         run: |
           if [ -f docker-compose.secrets.yml ]; then
