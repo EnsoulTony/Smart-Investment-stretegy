@@ -1197,733 +1197,2087 @@ with get_db_session() as session:
 - 若未來欄位標準化規則改變（例如台股代號補零規則），需升級為 `v2`
 - 不同版本的 hash 不會衝突，可安全共存於同一資料表
 - **操作建議**：若需要重新計算所有交易的 hash，應在低峰時段進行批次更新
-好，下面這一份是可直接放進 repo、可直接 commit 的正式版 RUNBOOK.md（安裝與驗證篇）。
-我用的是「工程交接等級」的寫法，不是教學文，重點是 可重現、可驗證、可排錯。
 
-你可以整份複製，或拆段放進既有 RUNBOOK。
+---
 
-⸻
+## Google Service Account 金鑰部署（docker compose secrets）
 
-RUNBOOK.md
+### 1. 問題症狀
+- portfolio_refresh sync 500，常見錯誤：
+  - `Is a directory: '/run/secrets/google_sa.json'`
+- 需提供 `GOOGLE_SA_JSON_PATH`（推薦）或 `GOOGLE_SA_JSON`（已棄用）
 
-Claude Code CLI 安裝與驗證（Codespaces / VS Code / iPad 友善）
+### 2. 根因說明
+- 若部署時直接用 `docker compose` 而未併入 `docker-compose.secrets.yml`，容器 runtime 會缺少 `GOOGLE_SA_JSON_PATH` 與金鑰檔案掛載，導致 sync 失敗。
+- pr_check 可能只走 409 fallback，未驗出金鑰缺失，導致假過。
 
-⸻
+### 3. 標準解法
+- 新增 repo root `dc.sh`，統一作為 compose 入口：
+  ```sh
+  docker compose -f docker-compose.yml -f docker-compose.secrets.yml --env-file .env "$@"
+  ```
+- `tools/pr_check.sh` 內所有 `docker compose ...` 指令一律改呼叫 `./dc.sh ...`（config/ps/exec/run 全部）
 
-目的（Why）
+### 4. secrets mount 規範
+- 金鑰檔案掛載到容器 `/run/keys/google_sa.json:ro`
+- portfolio-service env 使用 `GOOGLE_SA_JSON_PATH=/run/keys/google_sa.json`
+- 不使用 `/run/secrets`（避免 mount 變成 directory）
 
-本專案使用 Claude Code（Node.js CLI 版） 作為 AI 工程師，
-用於在 repo 內協助：
-	•	修改程式碼
-	•	新增 / 調整測試
-	•	依 prompt + guardrails 產生最小 diff
-	•	輔助 commit（需人工確認）
+### 5. 驗收準則
+- pr_check Step 5 env keys 必須出現 `GOOGLE_SA_JSON_PATH`
+- pr_check Step 10 portfolio_refresh 顯示 completed 且 valuation API 回 200
+- evidence_leak_check 必須 pass
 
-⚠️ 注意：
-本 RUNBOOK 僅涵蓋「Claude Code CLI（Node 版）」
-不使用 Python pip 套件（避免同名套件混淆）。
+---
 
-⸻
+# Sprint 1-4.3 驗收：Positions 寫回（帳務層完成）
 
-適用環境（Scope）
-	•	GitHub Codespaces（建議）
-	•	VS Code（Desktop / Web）
-	•	iPad（透過瀏覽器使用 Codespaces）
-	•	Node.js 環境（nvm）
+**目標**：從 `trades` 表重算並寫入 `positions` 表，只做帳務（qty/avg_cost/realized_pnl），不做估值/匯率。
 
-⸻
+**驗收命令**（可證偽）：
 
-前置條件（Prerequisites）
-	•	已建立 GitHub repo
-	•	可開啟 Codespaces
-	•	已申請 Anthropic API Key
-	•	申請位置：https://console.anthropic.com
-	•	API Key 已設為環境變數 ANTHROPIC_API_KEY
-
-⸻
-
-Step 1｜確認 Node.js 與 nvm
-
-在 Codespaces Terminal 執行：
-
-node -v
-npm -v
-
-預期：
-	•	有顯示版本號
-	•	若無，請先修復 Codespaces / Node 環境
-
-⸻
-
-Step 2｜全域安裝 Claude Code CLI（Node 版）
-
-npm install -g @anthropic-ai/claude-code
-
-說明
-	•	這會透過 nvm 安裝 CLI
-	•	可執行檔通常位於：
-	•	/home/codespace/nvm/current/bin/claude
-	•	或 /usr/local/share/nvm/versions/node/.../bin/claude
-
-⸻
-
-Step 3｜驗證 claude 指令是否可用
-
-which -a claude
-claude --version
-
-預期結果
-	•	which -a claude 至少顯示一個 nvm 路徑
-	•	claude --version 顯示類似：
-
-2.x.x (Claude Code)
-
-✅ 若符合，即表示 CLI 安裝成功
-
-⸻
-
-Step 4｜設定並驗證 API Key（不顯示內容）
-
-設定（範例）
-
-export ANTHROPIC_API_KEY="sk-ant-xxxx"
-
-⚠️ 請勿將 API Key commit 或貼入 Slack / Issue / PR
-
-驗證（安全方式）
-
-test -n "$ANTHROPIC_API_KEY" && echo "ANTHROPIC_API_KEY is set" || echo "ANTHROPIC_API_KEY missing"
-
-
-⸻
-
-Step 5｜（建議）永久化 API Key
-
-避免重開 terminal 後消失：
-
-nano ~/.bashrc
-
-加入一行：
-
-export ANTHROPIC_API_KEY="sk-ant-xxxx"
-
-套用：
-
-source ~/.bashrc
-
-
-⸻
-
-Step 6｜啟動 Claude Code（標準方式）
-
-cd /workspaces/<your-repo>
-claude
-
-成功狀態
-	•	進入 Claude Code 互動模式
-	•	無 authentication / API key 錯誤
-
-⸻
-
-標準使用流程（Required Practice）
-
-每一次使用 Claude Code 必須遵守：
-	1.	一次只執行 一個 prompt
-	2.	Prompt 必須包含：
-	•	Task
-	•	Files / Repo
-	•	Guardrails
-	•	Tests
-	•	Commit message
-	3.	要求 Claude：
-	•	Before coding：列出會修改的檔案與行數範圍
-	•	跑 pytest -q
-	4.	人工確認 git diff
-	5.	再允許 commit
-
-⸻
-
-常見錯誤與排查（Troubleshooting）
-
-❌ claude: command not found
-	•	原因：
-	•	裝到 Python 套件（pip）而非 Node CLI
-	•	PATH 未包含 nvm bin
-	•	解法：
-	•	移除 pip 套件：pip uninstall claude
-	•	重新執行 Step 2
-
-⸻
-
-❌ API key missing / authentication error
-	•	檢查：
-
-test -n "$ANTHROPIC_API_KEY"
-
-	•	確認 key 來自：
-	•	https://console.anthropic.com
-	•	不是 chat.claude.ai
-
-⸻
-
-安全規範（Security）
-	•	❌ 不得 echo $ANTHROPIC_API_KEY
-	•	❌ 不得將 key 寫入程式碼
-	•	❌ 不得 commit .env 含 key
-	•	若 key 外洩，立即：
-	1.	到 Anthropic Console revoke
-	2.	重新產生
-	3.	更新環境變數
-
-⸻
-
-本 RUNBOOK 的定位
-	•	本文件為 基礎設施等級文件
-	•	修改需經 code review
-	•	所有新成員 / 新 Codespace 必須依此驗證
-
-⸻
-
-最後確認清單（Checklist）
-	•	claude --version 正常
-	•	ANTHROPIC_API_KEY 已設
-	•	可進入 Claude Code REPL
-	•	已閱讀並理解使用規範
-
-⸻
-
-建議 Commit Message
-
-docs: add RUNBOOK for Claude Code CLI installation and verification
-
-
-⸻
-
-
-## 估值層 API-only 鐵律
-
-### 架構強制規則
-
-**valuation-service（估值層）**：
-- ❌ **禁止直連 Postgres 或任何 DB**：不得出現 `sqlalchemy`、`psycopg2`、`postgresql://` 連線字串
-- ❌ **禁止 DATABASE_URL 環境變數**：只能使用 `PORTFOLIO_BASE_URL`（HTTP URL）
-- ✅ **只能透過 HTTP API 取數**：使用 `PortfolioClient` 呼叫 `portfolio-service` 端點
-
-**portfolio-service（帳務層）**：
-- ❌ **禁止匯率折算**：不得呼叫 `fx.get_rate()` 或 `fx.convert()`
-- ❌ **禁止估值計算**：不得計算 `market_value`、`market_price`、`u_pnl`（除填 0）
-- ❌ **禁止 target_ccy 參數**：帳務 API 不接受目標幣別參數
-- ✅ **只做帳務**：`avg_cost`、`realized_pnl`、`quantity`、原始 `asset_ccy`
-
-### 驗收指令（正確跑法）
-
-**✅ 正確：在容器內跑單一 service 的測試**
+### 1. 測試套件通過
 
 ```bash
-# Portfolio Service 全量測試
+# 所有測試（無警告）
 docker compose exec -T portfolio-service pytest -q
-# 期望：82 passed
+# 期望：93 passed, 1 skipped, <2s
 
-# Portfolio Service FX 模組測試
-docker compose exec -T portfolio-service pytest -q -k fx
-# 期望：20 passed, 55 deselected
-
-# Valuation Service 全量測試
-docker compose exec -T valuation-service pytest -q
-# 期望：7 passed
+# rebuild 相關測試
+docker compose exec -T portfolio-service pytest -q -k rebuild
+# 期望：16+ passed（寫入、冪等性、零持倉刪除）
 ```
 
-**❌ 禁止：在 host venv 直接 pytest**
+### 2. API 回傳欄位驗證
 
 ```bash
-# 會跨服務收集測試，造成假失敗
-pytest -q           # ❌ 錯誤
-pytest -q -k fx     # ❌ 錯誤
+# 呼叫 rebuild_positions（query 參數）
+curl -s -X POST 'http://localhost:8001/portfolio/rebuild_positions?user_id=tony' | jq
+
+# 預期輸出：
+# {
+#   "status": "succeeded",
+#   "user_id": "tony",
+#   "symbols_count": <int>,
+#   "upserted_count": <int>,
+#   "deleted_or_zeroed_count": <int>,
+#   "run_id": "<uuid>",
+#   "evidence": {
+#     "positions_columns": [
+#       "user_id", "symbol", "asset_ccy", "quantity",
+#       "avg_cost", "realized_pnl", "u_pnl", "last_updated_at"
+#     ]
+#   }
+# }
+
+# 驗證點：
+# - run_id 為 UUID 格式
+# - symbols_count >= 0
+# - evidence.positions_columns 包含 8 個欄位
 ```
 
-**原因**：host venv 的 pytest 會掃描整個 repo，收集到其他 service 的測試（例如 valuation-service 的測試需要 httpx，但 portfolio-service venv 沒有），導致 import 錯誤或測試失敗。
-
-### 最小健康檢查
+### 3. 資料庫寫入驗證（psql）
 
 ```bash
-# Portfolio Service
-curl -s http://localhost:8001/health | jq
-# 期望：{"status": "healthy", "service": "portfolio-service"}
+# 查看 positions 表結構
+docker compose exec -T postgres psql -U portfolio_user -d portfolio_db \
+  -c "\d positions"
 
-# Valuation Service (port 依 docker-compose.yml 設定)
-curl -s http://localhost:8005/health | jq
-# 期望：{"status": "healthy", "service": "valuation-service"}
+# 預期欄位：
+# - quantity (numeric)
+# - avg_cost (numeric)
+# - realized_pnl (numeric)
+# - u_pnl (numeric) ← 當前固定 0
+
+# 查看實際資料
+docker compose exec -T postgres psql -U portfolio_user -d portfolio_db \
+  -c "SELECT user_id, symbol, quantity, ROUND(avg_cost::numeric, 2) as avg_cost \
+      FROM positions WHERE user_id='tony' ORDER BY symbol;"
+
+# 驗證點：
+# - u_pnl 固定為 0（不做估值）
+# - quantity, avg_cost, realized_pnl 有真實數值
 ```
 
-### Guardrails 測試驗收
-
-**估值層禁止 DB 直連**（5 個測試）：
+### 4. 禁止規則驗證（Guardrails）
 
 ```bash
+# 帳務層禁止 FX 模組
+grep -rn "from app.fx" services/portfolio-service/app/position_rebuilder.py
+# 期望：（空）
+
+# 帳務層禁止折算邏輯
+grep -rn "fx\.convert\|fx\.get_rate\|target_ccy" \
+  services/portfolio-service/app/position_rebuilder.py \
+  services/portfolio-service/app/domain/avg_cost_calculator.py
+# 期望：（空）
+
+# 估值層禁止 DB 直連
 docker compose exec -T valuation-service pytest -q tests/test_guardrails_no_db.py
 # 期望：5 passed
-# - test_requirements_no_db_drivers（禁止 requirements.txt 包含 DB driver）
-# - test_codebase_no_db_connection_strings（禁止 postgresql:// 連線字串）
-# - test_codebase_no_sqlalchemy_usage（禁止使用 SQLAlchemy）
-# - test_codebase_no_psycopg2_usage（禁止使用 psycopg2）
-# - test_codebase_uses_http_client（正向檢查：使用 httpx）
 ```
 
-**帳務層禁止估值邏輯**（4 個測試）：
+**可證偽檢查清單**（Sprint 1-4.3 階段）：
+
+- ✅ `rebuild_positions` 回傳包含 `run_id`, `symbols_count`, `evidence`
+- ✅ positions 表有 `u_pnl` 欄位（但值固定為 0）
+- ✅ 連續執行兩次 rebuild，結果一致（冪等性）
+- ✅ 賣光持倉後，positions 表自動刪除該筆記錄
+- ❌ positions 表**無**估值欄位（`valuation_ccy`, `market_value`, `market_price`）
+- ❌ portfolio-service 不呼叫 FX 模組（grep 無匹配）
+- ❌ valuation-service 不直連 DB（pytest guardrails 通過）
+
+**Troubleshooting**（當寫入數量/金額不符時）：
+
+1. **檢查 trades 來源**：
+   ```sql
+   SELECT user_id, symbol, asset_ccy, COUNT(*), SUM(quantity)
+   FROM trades WHERE user_id='<user_id>' GROUP BY 1,2,3;
+   ```
+
+2. **檢查分組與排序**：
+   ```bash
+   grep -A 5 "group_by\|order_by" services/portfolio-service/app/position_rebuilder.py
+   # 必須按 (user_id, symbol, asset_ccy) 分組，trade_date ASC 排序
+   ```
+
+3. **檢查 UPSERT 衝突鍵**：
+   ```sql
+   SELECT conname, pg_get_constraintdef(oid)
+   FROM pg_constraint
+   WHERE conrelid = 'positions'::regclass AND contype = 'u';
+   -- 預期：(user_id, symbol, asset_ccy) 唯一索引
+   ```
+
+4. **驗證冪等性**（連續執行兩次）：
+   ```bash
+   curl -X POST 'http://localhost:8001/portfolio/rebuild_positions?user_id=tony' | jq .symbols_count
+   curl -X POST 'http://localhost:8001/portfolio/rebuild_positions?user_id=tony' | jq .symbols_count
+   # 兩次結果應相同
+   ```
+
+---
+
+**檢查範例**（Sprint 1-4.3 驗收）：
 
 ```bash
-docker compose exec -T portfolio-service pytest -q tests/test_guardrails_accounting_boundary.py
-# 期望：4 passed
-# - test_accounting_modules_no_fx_calls（帳務模組禁止呼叫 FX API）
-# - test_accounting_modules_no_valuation_logic（帳務模組禁止計算估值）
-# - test_accounting_api_no_target_ccy（帳務 API 禁止 target_ccy 參數）
-# - test_position_model_accounting_only（Position 表只有帳務欄位）
+# 確認 Position 表無估值欄位
+docker compose exec postgres psql -U investment -d investment_db -c   "SELECT column_name FROM information_schema.columns    WHERE table_name='positions'    AND column_name ~ '(valuation|market_value)';"
+# 期望輸出：(0 rows)
+
+# 確認 u_pnl 欄位存在（帳務層固定填 0）
+docker compose exec postgres psql -U investment -d investment_db -c   "SELECT column_name FROM information_schema.columns    WHERE table_name='positions' AND column_name='u_pnl';"
+# 期望輸出：'0'::numeric
+```
+
+#### 規則 4：帳務層不做折算（最陰險的發散來源）
+
+**目的**：防止帳務邏輯（positions / avg cost / realized pnl）偷偷做匯率折算，確保架構邊界清晰。
+
+**檢查命令**：
+
+```bash
+# 檢查帳務層模組是否呼叫 FX API
+grep -rn "fx\.convert\|fx\.get_rate" \
+  services/portfolio-service/app/position_rebuilder.py \
+  services/portfolio-service/app/domain/avg_cost_calculator.py \
+  services/portfolio-service/app/repositories/trades_repository.py
+
+# 期望輸出：（空，無任何匹配）
+```
+
+**禁止清單**：
+- ❌ `app/position_rebuilder.py`、`avg_cost_calculator.py`、`trades_repository.py` 等**帳務模組**禁止呼叫 `fx.convert()` 或 `fx.get_rate()`
+- ❌ 帳務層禁止匯率折算邏輯（看起來只是乘個匯率，實際上會讓架構崩潰）
+- ❌ `rebuild_positions`、`calculate_avg_cost` 等帳務 API 禁止接受 `target_ccy` 參數
+
+**允許清單**：
+- ✅ **僅估值層模組**（Sprint 1-4.B 之後的 `valuation_service.py`、`valuation_module.py`）可呼叫 FX API
+- ✅ 估值層必須透過 `app.fx.get_fx_provider()` 取得 provider（唯一入口）
+- ✅ 帳務層只負責記錄原始幣別（`asset_ccy`）和原始金額，不做任何折算
+
+**違規後果**：
+- 架構邊界模糊，未來擴充估值層時會發現匯率邏輯散落各處
+- Debug 時無法確定「這個數字是原始金額還是折算後金額」
+- 測試時無法隔離帳務邏輯與估值邏輯
+
+#### Sprint 1-4.B 驗收：valuation-service 估值 API
+
+**目的**：落實估值層 API（HTTP-only 取數），並提供可證偽 evidence。
+
+**檢查命令**：
+
+```bash
+# 1. 啟動估值服務
+docker compose up -d --build valuation-service portfolio-service
+
+# 2. 健康檢查（含 runtime guard 狀態）
+curl -s http://localhost:8005/health | jq
+# 期望欄位：service_name, portfolio_base_url, providers, runtime_guard_status
+
+# 3. 估值 API（成功案例）
+curl -s "http://localhost:8005/valuation/portfolio?user_id=tony&base_ccy=USD&as_of=2026-01-24" | jq
+# 期望：status=succeeded + evidence.positions_hash + items[].fx_rate_to_base
+
+# 4. 估值 API（失敗案例：trades_count=0）
+curl -s -i "http://localhost:8005/valuation/portfolio?user_id=empty_user" | sed -n '1,20p'
+# 期望：HTTP 409 + detail.status=precondition_failed + evidence.trades_count=0
+
+# 5. Guardrails 測試（禁止 DB driver / DB env）
+docker compose exec -T valuation-service pytest -q
+# 期望：全部通過
+```
+
+**成功輸出範例（節錄）**：
+```json
+{
+  "status": "succeeded",
+  "user_id": "tony",
+  "base_ccy": "USD",
+  "as_of": "2026-01-24",
+  "items": [
+    {
+      "symbol": "AAPL",
+      "asset_ccy": "USD",
+      "price": 18.5,
+      "fx_rate_to_base": 1.0,
+      "market_value": 185.0,
+      "unrealized_pnl":  -15.0
+    }
+  ],
+  "evidence": {
+    "positions_count": 1,
+    "positions_hash": "<sha256>",
+    "trades_count": 2,
+    "distinct_symbols_count": 1,
+    "verification_sql": {
+      "trades_count": "select count(*) from trades where user_id='tony';",
+      "distinct_symbols": "select count(distinct symbol) from trades where user_id='tony';"
+    },
+    "providers": {
+      "price_provider": "stub",
+      "fx_provider": "stub",
+      "as_of": "2026-01-24"
+    }
+  }
+}
+```
+
+**失敗輸出範例（節錄）**：
+```json
+{
+  "detail": {
+    "status": "precondition_failed",
+    "user_id": "empty_user",
+    "evidence": {
+      "trades_count": 0,
+      "distinct_symbols_count": 0
+    }
+  }
+}
 ```
 
 ---
 
-# 標準刷新流程（Sync → Summary → Rebuild）
+### 原理說明
 
-**目標**：提供標準化、可機器執行的流程，確保不會再遇到 "rebuild succeeded but symbols_count=0" 問題。
+**為何禁止在 host venv 執行測試？**
 
-**核心工具**：`tools/portfolio_refresh.sh`
-
-**使用場景**：
-- 新用戶首次刷新 portfolio
-- 定期更新交易資料
-- automation / CI 流程
-- 手動運維操作
-
----
-
-## 🛠️ 工具腳本：portfolio_refresh.sh
-
-### 功能
-
-自動化執行完整刷新流程：
-1. 檢查 trades/summary
-2. 若 trades_count=0 → 執行 sync
-3. 執行 rebuild_positions（require_trades=1）
-4. 輸出可證偽的 evidence
-
-### 使用方式
-
-```bash
-# 基本用法
-./tools/portfolio_refresh.sh <user_id>
-
-# 範例
-./tools/portfolio_refresh.sh tony
-
-# 自定義 API endpoint（環境變數）
-PORTFOLIO_API=http://localhost:8001 ./tools/portfolio_refresh.sh tony
+```
+Smart-Investment-stretegy/         ← repo root
+├── .venv/                          ← host venv（沒有安裝 service 依賴）
+├── services/
+│   ├── api-gateway/
+│   │   ├── requirements.txt        ← fastapi, httpx
+│   │   └── tests/
+│   └── portfolio-service/
+│       ├── requirements.txt        ← fastapi, sqlalchemy, pandas
+│       └── tests/
+│           ├── test_fx.py          ← 需要 app.fx 模組
+│           └── test_rebuild_*.py   ← 需要 app.models
+└── pytest.ini                      ← pytest 會掃描所有 services/*/tests/
 ```
 
-### 退出碼
+執行流程對比：
 
-- **0**: 成功（positions 已刷新）
-- **1**: sync 失敗或 trades 仍為 0
-- **2**: rebuild 失敗（前置條件不滿足或其他錯誤）
-- **3**: 參數錯誤
+| 執行方式 | pytest 收集範圍 | Python 環境 | 結果 |
+|---------|---------------|-----------|------|
+| `pytest -q -k fx` (host venv) | **所有 services** | host venv（缺少依賴） | ❌ ModuleNotFoundError |
+| `docker compose exec portfolio-service pytest -q -k fx` | **只有 portfolio-service** | 容器內（完整依賴） | ✅ 20 passed |
 
 ---
 
-## 📋 完整流程範例（可複製執行）
-
-### 情境 A：全新用戶（trades=0）
+## 8. 常用指令速查
 
 ```bash
-# Step 1: 執行標準刷新流程
-./tools/portfolio_refresh.sh tony
+# 查看所有服務日誌
+make docker-logs
+
+# 手動重新部署（VM 上）
+sudo /opt/radar-warroom/infra/vm/deploy.sh
+
+# 匯出 Postgres 備份
+docker compose exec -T postgres pg_dump -U investment investment_db > backups/$(date +%F).sql
+
+# 執行 portfolio-service 驗收腳本
+bash services/portfolio-service/verify_sprint_1-3.sh
+
+# 查看最近一次 sync 的可觀測性資料
+docker compose exec portfolio-service python -c "
+from app.db import get_db_session
+from app.models import SyncRun
+with get_db_session() as session:
+    latest = session.query(SyncRun).order_by(SyncRun.started_at.desc()).first()
+    if latest:
+        print(f'sheet_rows: {latest.sheet_rows_count}, valid: {latest.normalized_valid_count}, invalid: {latest.normalized_invalid_count}, duplicates: {latest.duplicates_count}')
+"
+```
+
+## 9. Portfolio Service 可觀測性欄位參考（v0.2.3+）
+
+| 欄位 | 說明 | 正常範圍 | 異常判斷 |
+| --- | --- | --- | --- |
+| `sheet_rows_count` | Google Sheets 總列數 | > 0 | = 0 代表連線失敗或空表 |
+| `normalized_valid_count` | 成功轉換的筆數 | = inserted + duplicates | < sheet_rows 代表有格式錯誤 |
+| `normalized_invalid_count` | 格式錯誤筆數 | = 0 | > 0 時檢查日誌找出錯誤行 |
+| `duplicates_count` | 重複跳過筆數（hash 去重） | ≥ 0 | 若 = sheet_rows 代表全為舊資料 |
+| `inserted_count` | 新插入筆數 | ≥ 0 | = 0 時檢查是否 Sheets 未更新 |
+
+### Hash 版本控制機制（CANONICAL_VERSION="v1"）
+
+- `source_hash` 由 `v1:<SHA-256>` 組成，用於去重
+- 若未來欄位標準化規則改變（例如台股代號補零規則），需升級為 `v2`
+- 不同版本的 hash 不會衝突，可安全共存於同一資料表
+- **操作建議**：若需要重新計算所有交易的 hash，應在低峰時段進行批次更新
+
+---
+
+## Google Service Account 金鑰部署（docker compose secrets）
+
+### 1. 問題症狀
+- portfolio_refresh sync 500，常見錯誤：
+  - `Is a directory: '/run/secrets/google_sa.json'`
+- 需提供 `GOOGLE_SA_JSON_PATH`（推薦）或 `GOOGLE_SA_JSON`（已棄用）
+
+### 2. 根因說明
+- 若部署時直接用 `docker compose` 而未併入 `docker-compose.secrets.yml`，容器 runtime 會缺少 `GOOGLE_SA_JSON_PATH` 與金鑰檔案掛載，導致 sync 失敗。
+- pr_check 可能只走 409 fallback，未驗出金鑰缺失，導致假過。
+
+### 3. 標準解法
+- 新增 repo root `dc.sh`，統一作為 compose 入口：
+  ```sh
+  docker compose -f docker-compose.yml -f docker-compose.secrets.yml --env-file .env "$@"
+  ```
+- `tools/pr_check.sh` 內所有 `docker compose ...` 指令一律改呼叫 `./dc.sh ...`（config/ps/exec/run 全部）
+
+### 4. secrets mount 規範
+- 金鑰檔案掛載到容器 `/run/keys/google_sa.json:ro`
+- portfolio-service env 使用 `GOOGLE_SA_JSON_PATH=/run/keys/google_sa.json`
+- 不使用 `/run/secrets`（避免 mount 變成 directory）
+
+### 5. 驗收準則
+- pr_check Step 5 env keys 必須出現 `GOOGLE_SA_JSON_PATH`
+- pr_check Step 10 portfolio_refresh 顯示 completed 且 valuation API 回 200
+- evidence_leak_check 必須 pass
+
+---
+
+# Sprint 1-4.3 驗收：Positions 寫回（帳務層完成）
+
+**目標**：從 `trades` 表重算並寫入 `positions` 表，只做帳務（qty/avg_cost/realized_pnl），不做估值/匯率。
+
+**驗收命令**（可證偽）：
+
+### 1. 測試套件通過
+
+```bash
+# 所有測試（無警告）
+docker compose exec -T portfolio-service pytest -q
+# 期望：93 passed, 1 skipped, <2s
+
+# rebuild 相關測試
+docker compose exec -T portfolio-service pytest -q -k rebuild
+# 期望：16+ passed（寫入、冪等性、零持倉刪除）
+```
+
+### 2. API 回傳欄位驗證
+
+```bash
+# 呼叫 rebuild_positions（query 參數）
+curl -s -X POST 'http://localhost:8001/portfolio/rebuild_positions?user_id=tony' | jq
 
 # 預期輸出：
-# === Portfolio Refresh Tool ===
-# User: tony
-# 
-# 📋 Step 1: 檢查 trades summary
-# GET http://localhost:8001/portfolio/trades/summary?user_id=tony
-# HTTP 200
-#   trades_count: 0
-#   symbols_count: 0
-#   🔍 Verification SQL:
-#     select count(*) from trades where user_id='tony';
-# 
-# ⚠️  trades_count=0，需要執行 sync
-# 
-# 📥 Step 2: 執行 sync
-# POST http://localhost:8001/portfolio/sync?user_id=tony
-# HTTP 200
-#   status: succeeded
-#   synced_count: 66
-# 
-# 🔄 Step 2b: 再次檢查 trades summary
-# GET http://localhost:8001/portfolio/trades/summary?user_id=tony
-# HTTP 200
-#   trades_count: 66
-#   symbols_count: 5
-# ✅ sync 成功，trades_count=66
-# 
-# 🔨 Step 3: 執行 rebuild_positions (require_trades=1)
-# POST http://localhost:8001/portfolio/rebuild_positions?user_id=tony&require_trades=1
-# HTTP 200
-#   status: succeeded
-#   symbols_count: 5
-#   upserted_count: 5
-#   deleted_or_zeroed_count: 0
-# 
-# 🔍 Evidence (可證偽):
 # {
-#   "require_trades": true,
-#   "decision": "proceed",
-#   "trades_count": 66,
-#   "distinct_symbols_count": 5,
-#   "verification_sql": {
-#     "trades_count": "select count(*) from trades where user_id='tony';",
-#     "distinct_symbols": "select count(distinct symbol) from trades where user_id='tony';",
-#     "positions_count": "select count(*) from positions where user_id='tony';"
-#   },
-#   ...
-# }
-# 
-# 📊 可執行的驗證 SQL:
-#   Trades:    select count(*) from trades where user_id='tony';
-#   Positions: select count(*) from positions where user_id='tony';
-# 
-# ✅ Portfolio refresh 成功！
-#   - trades: 66 筆
-#   - symbols: 5 個
-#   - positions: 5 筆寫入
-
-# Step 2: DB 驗證
-docker compose exec -T postgres psql -U investment -d investment_db -c \
-"SELECT user_id, symbol, quantity, ROUND(avg_cost::numeric, 2) as avg_cost 
-FROM positions WHERE user_id='tony' ORDER BY symbol;"
-
-# 預期：5 rows（AAPL, GOOGL, MSFT, NVDA, TSLA）
-```
-
-### 情境 B：已有 trades 的用戶（跳過 sync）
-
-```bash
-./tools/portfolio_refresh.sh tony
-
-# 預期輸出：
-# === Portfolio Refresh Tool ===
-# User: tony
-# 
-# 📋 Step 1: 檢查 trades summary
-# GET http://localhost:8001/portfolio/trades/summary?user_id=tony
-# HTTP 200
-#   trades_count: 66
-#   symbols_count: 5
-# ✅ trades 已有資料，跳過 sync
-# 
-# 🔨 Step 3: 執行 rebuild_positions (require_trades=1)
-# HTTP 200
-#   status: succeeded
-#   symbols_count: 5
-#   upserted_count: 5
-# 
-# ✅ Portfolio refresh 成功！
-```
-
-### 情境 C：sync 後仍無 trades（失敗處理）
-
-```bash
-./tools/portfolio_refresh.sh nonexistent_user
-
-# 預期輸出：
-# === Portfolio Refresh Tool ===
-# User: nonexistent_user
-# 
-# 📋 Step 1: 檢查 trades summary
-# HTTP 200
-#   trades_count: 0
-#   symbols_count: 0
-# 
-# ⚠️  trades_count=0，需要執行 sync
-# 
-# 📥 Step 2: 執行 sync
-# HTTP 200
-#   status: succeeded
-#   synced_count: 0
-# 
-# 🔄 Step 2b: 再次檢查 trades summary
-# HTTP 200
-#   trades_count: 0
-#   symbols_count: 0
-# 
-# ❌ sync 後 trades_count 仍為 0，無法繼續
-# 可能原因：
-#   - Google Sheets 沒有該用戶的交易資料
-#   - Sheets 權限問題
-#   - sync 服務配置錯誤
-# 
-# 🔍 Evidence:
-# {
-#   "user_id": "nonexistent_user",
-#   "trades_count": 0,
-#   "symbols_count": 0,
-#   "evidence": {...}
-# }
-
-# Exit code: 1
-echo $?  # 輸出：1
-```
-
----
-
-## 🔧 Automation 整合
-
-### Makefile Target
-
-```makefile
-# 添加到專案 Makefile
-.PHONY: portfolio-refresh
-portfolio-refresh:
-	@echo "執行 portfolio refresh..."
-	./tools/portfolio_refresh.sh $(USER_ID)
-
-# 使用方式
-# make portfolio-refresh USER_ID=tony
-```
-
-### CI/CD 流程
-
-```yaml
-# GitHub Actions / GitLab CI 範例
-- name: Refresh Portfolio
-  run: |
-    ./tools/portfolio_refresh.sh tony
-    if [ $? -ne 0 ]; then
-      echo "❌ Portfolio refresh 失敗"
-      exit 1
-    fi
-```
-
-### Cron Job
-
-```bash
-# 每日 6:00 自動刷新
-0 6 * * * cd /path/to/Smart-Investment-stretegy && ./tools/portfolio_refresh.sh tony >> /var/log/portfolio_refresh.log 2>&1
-```
-
----
-
-## 🧪 驗收命令（可複製執行）
-
-```bash
-# 1. 確保工具腳本可執行
-ls -la tools/portfolio_refresh.sh
-# 預期：-rwxr-xr-x ... portfolio_refresh.sh
-
-# 2. 執行完整流程（假設 tony 無 trades）
-./tools/portfolio_refresh.sh tony
-
-# 3. 驗證 positions 表有資料
-docker compose exec -T postgres psql -U investment -d investment_db -c \
-"SELECT COUNT(*) as positions_count FROM positions WHERE user_id='tony';"
-# 預期：positions_count > 0
-
-# 4. 驗證 evidence SQL 可執行
-docker compose exec -T postgres psql -U investment -d investment_db -c \
-"select count(*) from trades where user_id='tony';"
-# 預期：count > 0
-
-# 5. 測試 valuation-service 前置檢查
-curl -s -X POST http://localhost:8002/valuation/revalue \
-  -H "Content-Type: application/json" \
-  -d '{"user_id":"empty_user"}' | jq
-
-# 預期（若 empty_user 無 trades）：
-# {
-#   "status": "no_data",
-#   "user_id": "empty_user",
-#   "message": "前置條件不滿足：trades_count=0，需要先執行 sync。使用 tools/portfolio_refresh.sh empty_user 自動執行完整流程。Evidence: {...}"
-# }
-
-# 6. 驗證 valuation-service 不直連 DB（guardrails）
-docker compose exec -T valuation-service pytest -q tests/test_guardrails_no_db_access.py
-# 預期：passed
-```
-
----
-
-## 🔍 可證偽性驗證
-
-### Evidence 結構檢查
-
-```bash
-# 取得 trades/summary evidence
-curl -s "http://localhost:8001/portfolio/trades/summary?user_id=tony" | jq .evidence
-
-# 必須包含：
-# {
-#   "verification_sql": {
-#     "trades_count": "select count(*) from trades where user_id='tony';",
-#     "distinct_symbols": "select count(distinct symbol) from trades where user_id='tony';"
+#   "status": "succeeded",
+#   "user_id": "tony",
+#   "symbols_count": <int>,
+#   "upserted_count": <int>,
+#   "deleted_or_zeroed_count": <int>,
+#   "run_id": "<uuid>",
+#   "evidence": {
+#     "positions_columns": [
+#       "user_id", "symbol", "asset_ccy", "quantity",
+#       "avg_cost", "realized_pnl", "u_pnl", "last_updated_at"
+#     ]
 #   }
 # }
 
-# 取得 rebuild evidence
-curl -s -X POST "http://localhost:8001/portfolio/rebuild_positions?user_id=tony&require_trades=1" | jq .evidence
+# 驗證點：
+# - run_id 為 UUID 格式
+# - symbols_count >= 0
+# - evidence.positions_columns 包含 8 個欄位
+```
 
-# 必須包含：
+### 3. 資料庫寫入驗證（psql）
+
+```bash
+# 查看 positions 表結構
+docker compose exec -T postgres psql -U portfolio_user -d portfolio_db \
+  -c "\d positions"
+
+# 預期欄位：
+# - quantity (numeric)
+# - avg_cost (numeric)
+# - realized_pnl (numeric)
+# - u_pnl (numeric) ← 當前固定 0
+
+# 查看實際資料
+docker compose exec -T postgres psql -U portfolio_user -d portfolio_db \
+  -c "SELECT user_id, symbol, quantity, ROUND(avg_cost::numeric, 2) as avg_cost \
+      FROM positions WHERE user_id='tony' ORDER BY symbol;"
+
+# 驗證點：
+# - u_pnl 固定為 0（不做估值）
+# - quantity, avg_cost, realized_pnl 有真實數值
+```
+
+### 4. 禁止規則驗證（Guardrails）
+
+```bash
+# 帳務層禁止 FX 模組
+grep -rn "from app.fx" services/portfolio-service/app/position_rebuilder.py
+# 期望：（空）
+
+# 帳務層禁止折算邏輯
+grep -rn "fx\.convert\|fx\.get_rate\|target_ccy" \
+  services/portfolio-service/app/position_rebuilder.py \
+  services/portfolio-service/app/domain/avg_cost_calculator.py
+# 期望：（空）
+
+# 估值層禁止 DB 直連
+docker compose exec -T valuation-service pytest -q tests/test_guardrails_no_db.py
+# 期望：5 passed
+```
+
+**可證偽檢查清單**（Sprint 1-4.3 階段）：
+
+- ✅ `rebuild_positions` 回傳包含 `run_id`, `symbols_count`, `evidence`
+- ✅ positions 表有 `u_pnl` 欄位（但值固定為 0）
+- ✅ 連續執行兩次 rebuild，結果一致（冪等性）
+- ✅ 賣光持倉後，positions 表自動刪除該筆記錄
+- ❌ positions 表**無**估值欄位（`valuation_ccy`, `market_value`, `market_price`）
+- ❌ portfolio-service 不呼叫 FX 模組（grep 無匹配）
+- ❌ valuation-service 不直連 DB（pytest guardrails 通過）
+
+**Troubleshooting**（當寫入數量/金額不符時）：
+
+1. **檢查 trades 來源**：
+   ```sql
+   SELECT user_id, symbol, asset_ccy, COUNT(*), SUM(quantity)
+   FROM trades WHERE user_id='<user_id>' GROUP BY 1,2,3;
+   ```
+
+2. **檢查分組與排序**：
+   ```bash
+   grep -A 5 "group_by\|order_by" services/portfolio-service/app/position_rebuilder.py
+   # 必須按 (user_id, symbol, asset_ccy) 分組，trade_date ASC 排序
+   ```
+
+3. **檢查 UPSERT 衝突鍵**：
+   ```sql
+   SELECT conname, pg_get_constraintdef(oid)
+   FROM pg_constraint
+   WHERE conrelid = 'positions'::regclass AND contype = 'u';
+   -- 預期：(user_id, symbol, asset_ccy) 唯一索引
+   ```
+
+4. **驗證冪等性**（連續執行兩次）：
+   ```bash
+   curl -X POST 'http://localhost:8001/portfolio/rebuild_positions?user_id=tony' | jq .symbols_count
+   curl -X POST 'http://localhost:8001/portfolio/rebuild_positions?user_id=tony' | jq .symbols_count
+   # 兩次結果應相同
+   ```
+
+---
+
+**檢查範例**（Sprint 1-4.3 驗收）：
+
+```bash
+# 確認 Position 表無估值欄位
+docker compose exec postgres psql -U investment -d investment_db -c   "SELECT column_name FROM information_schema.columns    WHERE table_name='positions'    AND column_name ~ '(valuation|market_value)';"
+# 期望輸出：(0 rows)
+
+# 確認 u_pnl 欄位存在（帳務層固定填 0）
+docker compose exec postgres psql -U investment -d investment_db -c   "SELECT column_name FROM information_schema.columns    WHERE table_name='positions' AND column_name='u_pnl';"
+# 期望輸出：'0'::numeric
+```
+
+#### 規則 4：帳務層不做折算（最陰險的發散來源）
+
+**目的**：防止帳務邏輯（positions / avg cost / realized pnl）偷偷做匯率折算，確保架構邊界清晰。
+
+**檢查命令**：
+
+```bash
+# 檢查帳務層模組是否呼叫 FX API
+grep -rn "fx\.convert\|fx\.get_rate" \
+  services/portfolio-service/app/position_rebuilder.py \
+  services/portfolio-service/app/domain/avg_cost_calculator.py \
+  services/portfolio-service/app/repositories/trades_repository.py
+
+# 期望輸出：（空，無任何匹配）
+```
+
+**禁止清單**：
+- ❌ `app/position_rebuilder.py`、`avg_cost_calculator.py`、`trades_repository.py` 等**帳務模組**禁止呼叫 `fx.convert()` 或 `fx.get_rate()`
+- ❌ 帳務層禁止匯率折算邏輯（看起來只是乘個匯率，實際上會讓架構崩潰）
+- ❌ `rebuild_positions`、`calculate_avg_cost` 等帳務 API 禁止接受 `target_ccy` 參數
+
+**允許清單**：
+- ✅ **僅估值層模組**（Sprint 1-4.B 之後的 `valuation_service.py`、`valuation_module.py`）可呼叫 FX API
+- ✅ 估值層必須透過 `app.fx.get_fx_provider()` 取得 provider（唯一入口）
+- ✅ 帳務層只負責記錄原始幣別（`asset_ccy`）和原始金額，不做任何折算
+
+**違規後果**：
+- 架構邊界模糊，未來擴充估值層時會發現匯率邏輯散落各處
+- Debug 時無法確定「這個數字是原始金額還是折算後金額」
+- 測試時無法隔離帳務邏輯與估值邏輯
+
+#### Sprint 1-4.B 驗收：valuation-service 估值 API
+
+**目的**：落實估值層 API（HTTP-only 取數），並提供可證偽 evidence。
+
+**檢查命令**：
+
+```bash
+# 1. 啟動估值服務
+docker compose up -d --build valuation-service portfolio-service
+
+# 2. 健康檢查（含 runtime guard 狀態）
+curl -s http://localhost:8005/health | jq
+# 期望欄位：service_name, portfolio_base_url, providers, runtime_guard_status
+
+# 3. 估值 API（成功案例）
+curl -s "http://localhost:8005/valuation/portfolio?user_id=tony&base_ccy=USD&as_of=2026-01-24" | jq
+# 期望：status=succeeded + evidence.positions_hash + items[].fx_rate_to_base
+
+# 4. 估值 API（失敗案例：trades_count=0）
+curl -s -i "http://localhost:8005/valuation/portfolio?user_id=empty_user" | sed -n '1,20p'
+# 期望：HTTP 409 + detail.status=precondition_failed + evidence.trades_count=0
+
+# 5. Guardrails 測試（禁止 DB driver / DB env）
+docker compose exec -T valuation-service pytest -q
+# 期望：全部通過
+```
+
+**成功輸出範例（節錄）**：
+```json
+{
+  "status": "succeeded",
+  "user_id": "tony",
+  "base_ccy": "USD",
+  "as_of": "2026-01-24",
+  "items": [
+    {
+      "symbol": "AAPL",
+      "asset_ccy": "USD",
+      "price": 18.5,
+      "fx_rate_to_base": 1.0,
+      "market_value": 185.0,
+      "unrealized_pnl":  -15.0
+    }
+  ],
+  "evidence": {
+    "positions_count": 1,
+    "positions_hash": "<sha256>",
+    "trades_count": 2,
+    "distinct_symbols_count": 1,
+    "verification_sql": {
+      "trades_count": "select count(*) from trades where user_id='tony';",
+      "distinct_symbols": "select count(distinct symbol) from trades where user_id='tony';"
+    },
+    "providers": {
+      "price_provider": "stub",
+      "fx_provider": "stub",
+      "as_of": "2026-01-24"
+    }
+  }
+}
+```
+
+**失敗輸出範例（節錄）**：
+```json
+{
+  "detail": {
+    "status": "precondition_failed",
+    "user_id": "empty_user",
+    "evidence": {
+      "trades_count": 0,
+      "distinct_symbols_count": 0
+    }
+  }
+}
+```
+
+---
+
+### 原理說明
+
+**為何禁止在 host venv 執行測試？**
+
+```
+Smart-Investment-stretegy/         ← repo root
+├── .venv/                          ← host venv（沒有安裝 service 依賴）
+├── services/
+│   ├── api-gateway/
+│   │   ├── requirements.txt        ← fastapi, httpx
+│   │   └── tests/
+│   └── portfolio-service/
+│       ├── requirements.txt        ← fastapi, sqlalchemy, pandas
+│       └── tests/
+│           ├── test_fx.py          ← 需要 app.fx 模組
+│           └── test_rebuild_*.py   ← 需要 app.models
+└── pytest.ini                      ← pytest 會掃描所有 services/*/tests/
+```
+
+執行流程對比：
+
+| 執行方式 | pytest 收集範圍 | Python 環境 | 結果 |
+|---------|---------------|-----------|------|
+| `pytest -q -k fx` (host venv) | **所有 services** | host venv（缺少依賴） | ❌ ModuleNotFoundError |
+| `docker compose exec portfolio-service pytest -q -k fx` | **只有 portfolio-service** | 容器內（完整依賴） | ✅ 20 passed |
+
+---
+
+## 8. 常用指令速查
+
+```bash
+# 查看所有服務日誌
+make docker-logs
+
+# 手動重新部署（VM 上）
+sudo /opt/radar-warroom/infra/vm/deploy.sh
+
+# 匯出 Postgres 備份
+docker compose exec -T postgres pg_dump -U investment investment_db > backups/$(date +%F).sql
+
+# 執行 portfolio-service 驗收腳本
+bash services/portfolio-service/verify_sprint_1-3.sh
+
+# 查看最近一次 sync 的可觀測性資料
+docker compose exec portfolio-service python -c "
+from app.db import get_db_session
+from app.models import SyncRun
+with get_db_session() as session:
+    latest = session.query(SyncRun).order_by(SyncRun.started_at.desc()).first()
+    if latest:
+        print(f'sheet_rows: {latest.sheet_rows_count}, valid: {latest.normalized_valid_count}, invalid: {latest.normalized_invalid_count}, duplicates: {latest.duplicates_count}')
+"
+```
+
+## 9. Portfolio Service 可觀測性欄位參考（v0.2.3+）
+
+| 欄位 | 說明 | 正常範圍 | 異常判斷 |
+| --- | --- | --- | --- |
+| `sheet_rows_count` | Google Sheets 總列數 | > 0 | = 0 代表連線失敗或空表 |
+| `normalized_valid_count` | 成功轉換的筆數 | = inserted + duplicates | < sheet_rows 代表有格式錯誤 |
+| `normalized_invalid_count` | 格式錯誤筆數 | = 0 | > 0 時檢查日誌找出錯誤行 |
+| `duplicates_count` | 重複跳過筆數（hash 去重） | ≥ 0 | 若 = sheet_rows 代表全為舊資料 |
+| `inserted_count` | 新插入筆數 | ≥ 0 | = 0 時檢查是否 Sheets 未更新 |
+
+### Hash 版本控制機制（CANONICAL_VERSION="v1"）
+
+- `source_hash` 由 `v1:<SHA-256>` 組成，用於去重
+- 若未來欄位標準化規則改變（例如台股代號補零規則），需升級為 `v2`
+- 不同版本的 hash 不會衝突，可安全共存於同一資料表
+- **操作建議**：若需要重新計算所有交易的 hash，應在低峰時段進行批次更新
+
+---
+
+## Google Service Account 金鑰部署（docker compose secrets）
+
+### 1. 問題症狀
+- portfolio_refresh sync 500，常見錯誤：
+  - `Is a directory: '/run/secrets/google_sa.json'`
+- 需提供 `GOOGLE_SA_JSON_PATH`（推薦）或 `GOOGLE_SA_JSON`（已棄用）
+
+### 2. 根因說明
+- 若部署時直接用 `docker compose` 而未併入 `docker-compose.secrets.yml`，容器 runtime 會缺少 `GOOGLE_SA_JSON_PATH` 與金鑰檔案掛載，導致 sync 失敗。
+- pr_check 可能只走 409 fallback，未驗出金鑰缺失，導致假過。
+
+### 3. 標準解法
+- 新增 repo root `dc.sh`，統一作為 compose 入口：
+  ```sh
+  docker compose -f docker-compose.yml -f docker-compose.secrets.yml --env-file .env "$@"
+  ```
+- `tools/pr_check.sh` 內所有 `docker compose ...` 指令一律改呼叫 `./dc.sh ...`（config/ps/exec/run 全部）
+
+### 4. secrets mount 規範
+- 金鑰檔案掛載到容器 `/run/keys/google_sa.json:ro`
+- portfolio-service env 使用 `GOOGLE_SA_JSON_PATH=/run/keys/google_sa.json`
+- 不使用 `/run/secrets`（避免 mount 變成 directory）
+
+### 5. 驗收準則
+- pr_check Step 5 env keys 必須出現 `GOOGLE_SA_JSON_PATH`
+- pr_check Step 10 portfolio_refresh 顯示 completed 且 valuation API 回 200
+- evidence_leak_check 必須 pass
+
+---
+
+# Sprint 1-4.3 驗收：Positions 寫回（帳務層完成）
+
+**目標**：從 `trades` 表重算並寫入 `positions` 表，只做帳務（qty/avg_cost/realized_pnl），不做估值/匯率。
+
+**驗收命令**（可證偽）：
+
+### 1. 測試套件通過
+
+```bash
+# 所有測試（無警告）
+docker compose exec -T portfolio-service pytest -q
+# 期望：93 passed, 1 skipped, <2s
+
+# rebuild 相關測試
+docker compose exec -T portfolio-service pytest -q -k rebuild
+# 期望：16+ passed（寫入、冪等性、零持倉刪除）
+```
+
+### 2. API 回傳欄位驗證
+
+```bash
+# 呼叫 rebuild_positions（query 參數）
+curl -s -X POST 'http://localhost:8001/portfolio/rebuild_positions?user_id=tony' | jq
+
+# 預期輸出：
 # {
-#   "require_trades": true,
-#   "decision": "proceed",
-#   "trades_count": 66,
-#   "distinct_symbols_count": 5,
-#   "verification_sql": {
-#     "trades_count": "...",
-#     "distinct_symbols": "...",
-#     "positions_count": "..."
+#   "status": "succeeded",
+#   "user_id": "tony",
+#   "symbols_count": <int>,
+#   "upserted_count": <int>,
+#   "deleted_or_zeroed_count": <int>,
+#   "run_id": "<uuid>",
+#   "evidence": {
+#     "positions_columns": [
+#       "user_id", "symbol", "asset_ccy", "quantity",
+#       "avg_cost", "realized_pnl", "u_pnl", "last_updated_at"
+#     ]
 #   }
 # }
+
+# 驗證點：
+# - run_id 為 UUID 格式
+# - symbols_count >= 0
+# - evidence.positions_columns 包含 8 個欄位
 ```
 
-### 手動執行 Verification SQL
+### 3. 資料庫寫入驗證（psql）
 
 ```bash
-# 從 evidence 複製 SQL 執行
-docker compose exec -T postgres psql -U investment -d investment_db -c \
-"select count(*) from trades where user_id='tony';"
+# 查看 positions 表結構
+docker compose exec -T postgres psql -U portfolio_user -d portfolio_db \
+  -c "\d positions"
 
-# 結果應與 API 回傳的 trades_count 一致
+# 預期欄位：
+# - quantity (numeric)
+# - avg_cost (numeric)
+# - realized_pnl (numeric)
+# - u_pnl (numeric) ← 當前固定 0
 
-docker compose exec -T postgres psql -U investment -d investment_db -c \
-"select count(distinct symbol) from trades where user_id='tony';"
+# 查看實際資料
+docker compose exec -T postgres psql -U portfolio_user -d portfolio_db \
+  -c "SELECT user_id, symbol, quantity, ROUND(avg_cost::numeric, 2) as avg_cost \
+      FROM positions WHERE user_id='tony' ORDER BY symbol;"
 
-# 結果應與 API 回傳的 symbols_count 一致
+# 驗證點：
+# - u_pnl 固定為 0（不做估值）
+# - quantity, avg_cost, realized_pnl 有真實數值
+```
+
+### 4. 禁止規則驗證（Guardrails）
+
+```bash
+# 帳務層禁止 FX 模組
+grep -rn "from app.fx" services/portfolio-service/app/position_rebuilder.py
+# 期望：（空）
+
+# 帳務層禁止折算邏輯
+grep -rn "fx\.convert\|fx\.get_rate\|target_ccy" \
+  services/portfolio-service/app/position_rebuilder.py \
+  services/portfolio-service/app/domain/avg_cost_calculator.py
+# 期望：（空）
+
+# 估值層禁止 DB 直連
+docker compose exec -T valuation-service pytest -q tests/test_guardrails_no_db.py
+# 期望：5 passed
+```
+
+**可證偽檢查清單**（Sprint 1-4.3 階段）：
+
+- ✅ `rebuild_positions` 回傳包含 `run_id`, `symbols_count`, `evidence`
+- ✅ positions 表有 `u_pnl` 欄位（但值固定為 0）
+- ✅ 連續執行兩次 rebuild，結果一致（冪等性）
+- ✅ 賣光持倉後，positions 表自動刪除該筆記錄
+- ❌ positions 表**無**估值欄位（`valuation_ccy`, `market_value`, `market_price`）
+- ❌ portfolio-service 不呼叫 FX 模組（grep 無匹配）
+- ❌ valuation-service 不直連 DB（pytest guardrails 通過）
+
+**Troubleshooting**（當寫入數量/金額不符時）：
+
+1. **檢查 trades 來源**：
+   ```sql
+   SELECT user_id, symbol, asset_ccy, COUNT(*), SUM(quantity)
+   FROM trades WHERE user_id='<user_id>' GROUP BY 1,2,3;
+   ```
+
+2. **檢查分組與排序**：
+   ```bash
+   grep -A 5 "group_by\|order_by" services/portfolio-service/app/position_rebuilder.py
+   # 必須按 (user_id, symbol, asset_ccy) 分組，trade_date ASC 排序
+   ```
+
+3. **檢查 UPSERT 衝突鍵**：
+   ```sql
+   SELECT conname, pg_get_constraintdef(oid)
+   FROM pg_constraint
+   WHERE conrelid = 'positions'::regclass AND contype = 'u';
+   -- 預期：(user_id, symbol, asset_ccy) 唯一索引
+   ```
+
+4. **驗證冪等性**（連續執行兩次）：
+   ```bash
+   curl -X POST 'http://localhost:8001/portfolio/rebuild_positions?user_id=tony' | jq .symbols_count
+   curl -X POST 'http://localhost:8001/portfolio/rebuild_positions?user_id=tony' | jq .symbols_count
+   # 兩次結果應相同
+   ```
+
+---
+
+**檢查範例**（Sprint 1-4.3 驗收）：
+
+```bash
+# 確認 Position 表無估值欄位
+docker compose exec postgres psql -U investment -d investment_db -c   "SELECT column_name FROM information_schema.columns    WHERE table_name='positions'    AND column_name ~ '(valuation|market_value)';"
+# 期望輸出：(0 rows)
+
+# 確認 u_pnl 欄位存在（帳務層固定填 0）
+docker compose exec postgres psql -U investment -d investment_db -c   "SELECT column_name FROM information_schema.columns    WHERE table_name='positions' AND column_name='u_pnl';"
+# 期望輸出：'0'::numeric
+```
+
+#### 規則 4：帳務層不做折算（最陰險的發散來源）
+
+**目的**：防止帳務邏輯（positions / avg cost / realized pnl）偷偷做匯率折算，確保架構邊界清晰。
+
+**檢查命令**：
+
+```bash
+# 檢查帳務層模組是否呼叫 FX API
+grep -rn "fx\.convert\|fx\.get_rate" \
+  services/portfolio-service/app/position_rebuilder.py \
+  services/portfolio-service/app/domain/avg_cost_calculator.py \
+  services/portfolio-service/app/repositories/trades_repository.py
+
+# 期望輸出：（空，無任何匹配）
+```
+
+**禁止清單**：
+- ❌ `app/position_rebuilder.py`、`avg_cost_calculator.py`、`trades_repository.py` 等**帳務模組**禁止呼叫 `fx.convert()` 或 `fx.get_rate()`
+- ❌ 帳務層禁止匯率折算邏輯（看起來只是乘個匯率，實際上會讓架構崩潰）
+- ❌ `rebuild_positions`、`calculate_avg_cost` 等帳務 API 禁止接受 `target_ccy` 參數
+
+**允許清單**：
+- ✅ **僅估值層模組**（Sprint 1-4.B 之後的 `valuation_service.py`、`valuation_module.py`）可呼叫 FX API
+- ✅ 估值層必須透過 `app.fx.get_fx_provider()` 取得 provider（唯一入口）
+- ✅ 帳務層只負責記錄原始幣別（`asset_ccy`）和原始金額，不做任何折算
+
+**違規後果**：
+- 架構邊界模糊，未來擴充估值層時會發現匯率邏輯散落各處
+- Debug 時無法確定「這個數字是原始金額還是折算後金額」
+- 測試時無法隔離帳務邏輯與估值邏輯
+
+#### Sprint 1-4.B 驗收：valuation-service 估值 API
+
+**目的**：落實估值層 API（HTTP-only 取數），並提供可證偽 evidence。
+
+**檢查命令**：
+
+```bash
+# 1. 啟動估值服務
+docker compose up -d --build valuation-service portfolio-service
+
+# 2. 健康檢查（含 runtime guard 狀態）
+curl -s http://localhost:8005/health | jq
+# 期望欄位：service_name, portfolio_base_url, providers, runtime_guard_status
+
+# 3. 估值 API（成功案例）
+curl -s "http://localhost:8005/valuation/portfolio?user_id=tony&base_ccy=USD&as_of=2026-01-24" | jq
+# 期望：status=succeeded + evidence.positions_hash + items[].fx_rate_to_base
+
+# 4. 估值 API（失敗案例：trades_count=0）
+curl -s -i "http://localhost:8005/valuation/portfolio?user_id=empty_user" | sed -n '1,20p'
+# 期望：HTTP 409 + detail.status=precondition_failed + evidence.trades_count=0
+
+# 5. Guardrails 測試（禁止 DB driver / DB env）
+docker compose exec -T valuation-service pytest -q
+# 期望：全部通過
+```
+
+**成功輸出範例（節錄）**：
+```json
+{
+  "status": "succeeded",
+  "user_id": "tony",
+  "base_ccy": "USD",
+  "as_of": "2026-01-24",
+  "items": [
+    {
+      "symbol": "AAPL",
+      "asset_ccy": "USD",
+      "price": 18.5,
+      "fx_rate_to_base": 1.0,
+      "market_value": 185.0,
+      "unrealized_pnl":  -15.0
+    }
+  ],
+  "evidence": {
+    "positions_count": 1,
+    "positions_hash": "<sha256>",
+    "trades_count": 2,
+    "distinct_symbols_count": 1,
+    "verification_sql": {
+      "trades_count": "select count(*) from trades where user_id='tony';",
+      "distinct_symbols": "select count(distinct symbol) from trades where user_id='tony';"
+    },
+    "providers": {
+      "price_provider": "stub",
+      "fx_provider": "stub",
+      "as_of": "2026-01-24"
+    }
+  }
+}
+```
+
+**失敗輸出範例（節錄）**：
+```json
+{
+  "detail": {
+    "status": "precondition_failed",
+    "user_id": "empty_user",
+    "evidence": {
+      "trades_count": 0,
+      "distinct_symbols_count": 0
+    }
+  }
+}
 ```
 
 ---
 
-## 🚫 禁止事項（強制規則）
+### 原理說明
 
-### ❌ 禁止手動跳過 require_trades
+**為何禁止在 host venv 執行測試？**
 
-```bash
-# ❌ 錯誤：手動 rebuild 不帶 require_trades=1
-curl -X POST http://localhost:8001/portfolio/rebuild_positions?user_id=tony
-
-# ✅ 正確：使用工具腳本（自動帶 require_trades=1）
-./tools/portfolio_refresh.sh tony
-
-# ✅ 正確：手動呼叫必須帶 require_trades=1
-curl -X POST "http://localhost:8001/portfolio/rebuild_positions?user_id=tony&require_trades=1"
+```
+Smart-Investment-stretegy/         ← repo root
+├── .venv/                          ← host venv（沒有安裝 service 依賴）
+├── services/
+│   ├── api-gateway/
+│   │   ├── requirements.txt        ← fastapi, httpx
+│   │   └── tests/
+│   └── portfolio-service/
+│       ├── requirements.txt        ← fastapi, sqlalchemy, pandas
+│       └── tests/
+│           ├── test_fx.py          ← 需要 app.fx 模組
+│           └── test_rebuild_*.py   ← 需要 app.models
+└── pytest.ini                      ← pytest 會掃描所有 services/*/tests/
 ```
 
-### ❌ 禁止 valuation-service 直連 DB
+執行流程對比：
+
+| 執行方式 | pytest 收集範圍 | Python 環境 | 結果 |
+|---------|---------------|-----------|------|
+| `pytest -q -k fx` (host venv) | **所有 services** | host venv（缺少依賴） | ❌ ModuleNotFoundError |
+| `docker compose exec portfolio-service pytest -q -k fx` | **只有 portfolio-service** | 容器內（完整依賴） | ✅ 20 passed |
+
+---
+
+## 8. 常用指令速查
 
 ```bash
-# 驗證 guardrails
-docker compose exec -T valuation-service env | grep DATABASE
-# 預期：無任何 DATABASE_URL 或類似環境變數
+# 查看所有服務日誌
+make docker-logs
 
-docker compose exec -T valuation-service pytest -q tests/test_guardrails_no_db_access.py
-# 預期：passed（禁止 DB library import）
+# 手動重新部署（VM 上）
+sudo /opt/radar-warroom/infra/vm/deploy.sh
+
+# 匯出 Postgres 備份
+docker compose exec -T postgres pg_dump -U investment investment_db > backups/$(date +%F).sql
+
+# 執行 portfolio-service 驗收腳本
+bash services/portfolio-service/verify_sprint_1-3.sh
+
+# 查看最近一次 sync 的可觀測性資料
+docker compose exec portfolio-service python -c "
+from app.db import get_db_session
+from app.models import SyncRun
+with get_db_session() as session:
+    latest = session.query(SyncRun).order_by(SyncRun.started_at.desc()).first()
+    if latest:
+        print(f'sheet_rows: {latest.sheet_rows_count}, valid: {latest.normalized_valid_count}, invalid: {latest.normalized_invalid_count}, duplicates: {latest.duplicates_count}')
+"
 ```
 
-### ❌ 禁止 rebuild 內部偷偷呼叫 sync
+## 9. Portfolio Service 可觀測性欄位參考（v0.2.3+）
+
+| 欄位 | 說明 | 正常範圍 | 異常判斷 |
+| --- | --- | --- | --- |
+| `sheet_rows_count` | Google Sheets 總列數 | > 0 | = 0 代表連線失敗或空表 |
+| `normalized_valid_count` | 成功轉換的筆數 | = inserted + duplicates | < sheet_rows 代表有格式錯誤 |
+| `normalized_invalid_count` | 格式錯誤筆數 | = 0 | > 0 時檢查日誌找出錯誤行 |
+| `duplicates_count` | 重複跳過筆數（hash 去重） | ≥ 0 | 若 = sheet_rows 代表全為舊資料 |
+| `inserted_count` | 新插入筆數 | ≥ 0 | = 0 時檢查是否 Sheets 未更新 |
+
+### Hash 版本控制機制（CANONICAL_VERSION="v1"）
+
+- `source_hash` 由 `v1:<SHA-256>` 組成，用於去重
+- 若未來欄位標準化規則改變（例如台股代號補零規則），需升級為 `v2`
+- 不同版本的 hash 不會衝突，可安全共存於同一資料表
+- **操作建議**：若需要重新計算所有交易的 hash，應在低峰時段進行批次更新
+
+---
+
+## Google Service Account 金鑰部署（docker compose secrets）
+
+### 1. 問題症狀
+- portfolio_refresh sync 500，常見錯誤：
+  - `Is a directory: '/run/secrets/google_sa.json'`
+- 需提供 `GOOGLE_SA_JSON_PATH`（推薦）或 `GOOGLE_SA_JSON`（已棄用）
+
+### 2. 根因說明
+- 若部署時直接用 `docker compose` 而未併入 `docker-compose.secrets.yml`，容器 runtime 會缺少 `GOOGLE_SA_JSON_PATH` 與金鑰檔案掛載，導致 sync 失敗。
+- pr_check 可能只走 409 fallback，未驗出金鑰缺失，導致假過。
+
+### 3. 標準解法
+- 新增 repo root `dc.sh`，統一作為 compose 入口：
+  ```sh
+  docker compose -f docker-compose.yml -f docker-compose.secrets.yml --env-file .env "$@"
+  ```
+- `tools/pr_check.sh` 內所有 `docker compose ...` 指令一律改呼叫 `./dc.sh ...`（config/ps/exec/run 全部）
+
+### 4. secrets mount 規範
+- 金鑰檔案掛載到容器 `/run/keys/google_sa.json:ro`
+- portfolio-service env 使用 `GOOGLE_SA_JSON_PATH=/run/keys/google_sa.json`
+- 不使用 `/run/secrets`（避免 mount 變成 directory）
+
+### 5. 驗收準則
+- pr_check Step 5 env keys 必須出現 `GOOGLE_SA_JSON_PATH`
+- pr_check Step 10 portfolio_refresh 顯示 completed 且 valuation API 回 200
+- evidence_leak_check 必須 pass
+
+---
+
+# Sprint 1-4.3 驗收：Positions 寫回（帳務層完成）
+
+**目標**：從 `trades` 表重算並寫入 `positions` 表，只做帳務（qty/avg_cost/realized_pnl），不做估值/匯率。
+
+**驗收命令**（可證偽）：
+
+### 1. 測試套件通過
 
 ```bash
-# 驗證：即使 trades=0，rebuild 也不會自動 sync
-# 1. 清空 trades
-docker compose exec -T postgres psql -U investment -d investment_db -c \
-"DELETE FROM trades WHERE user_id='test_user';"
+# 所有測試（無警告）
+docker compose exec -T portfolio-service pytest -q
+# 期望：93 passed, 1 skipped, <2s
 
-# 2. 呼叫 rebuild（require_trades=1）
-curl -s -X POST "http://localhost:8001/portfolio/rebuild_positions?user_id=test_user&require_trades=1"
-# 預期：HTTP 409，status="precondition_failed"（不會自動 sync）
+# rebuild 相關測試
+docker compose exec -T portfolio-service pytest -q -k rebuild
+# 期望：16+ passed（寫入、冪等性、零持倉刪除）
+```
 
-# 3. 必須手動 sync 或使用工具腳本
-./tools/portfolio_refresh.sh test_user
+### 2. API 回傳欄位驗證
+
+```bash
+# 呼叫 rebuild_positions（query 參數）
+curl -s -X POST 'http://localhost:8001/portfolio/rebuild_positions?user_id=tony' | jq
+
+# 預期輸出：
+# {
+#   "status": "succeeded",
+#   "user_id": "tony",
+#   "symbols_count": <int>,
+#   "upserted_count": <int>,
+#   "deleted_or_zeroed_count": <int>,
+#   "run_id": "<uuid>",
+#   "evidence": {
+#     "positions_columns": [
+#       "user_id", "symbol", "asset_ccy", "quantity",
+#       "avg_cost", "realized_pnl", "u_pnl", "last_updated_at"
+#     ]
+#   }
+# }
+
+# 驗證點：
+# - run_id 為 UUID 格式
+# - symbols_count >= 0
+# - evidence.positions_columns 包含 8 個欄位
+```
+
+### 3. 資料庫寫入驗證（psql）
+
+```bash
+# 查看 positions 表結構
+docker compose exec -T postgres psql -U portfolio_user -d portfolio_db \
+  -c "\d positions"
+
+# 預期欄位：
+# - quantity (numeric)
+# - avg_cost (numeric)
+# - realized_pnl (numeric)
+# - u_pnl (numeric) ← 當前固定 0
+
+# 查看實際資料
+docker compose exec -T postgres psql -U portfolio_user -d portfolio_db \
+  -c "SELECT user_id, symbol, quantity, ROUND(avg_cost::numeric, 2) as avg_cost \
+      FROM positions WHERE user_id='tony' ORDER BY symbol;"
+
+# 驗證點：
+# - u_pnl 固定為 0（不做估值）
+# - quantity, avg_cost, realized_pnl 有真實數值
+```
+
+### 4. 禁止規則驗證（Guardrails）
+
+```bash
+# 帳務層禁止 FX 模組
+grep -rn "from app.fx" services/portfolio-service/app/position_rebuilder.py
+# 期望：（空）
+
+# 帳務層禁止折算邏輯
+grep -rn "fx\.convert\|fx\.get_rate\|target_ccy" \
+  services/portfolio-service/app/position_rebuilder.py \
+  services/portfolio-service/app/domain/avg_cost_calculator.py
+# 期望：（空）
+
+# 估值層禁止 DB 直連
+docker compose exec -T valuation-service pytest -q tests/test_guardrails_no_db.py
+# 期望：5 passed
+```
+
+**可證偽檢查清單**（Sprint 1-4.3 階段）：
+
+- ✅ `rebuild_positions` 回傳包含 `run_id`, `symbols_count`, `evidence`
+- ✅ positions 表有 `u_pnl` 欄位（但值固定為 0）
+- ✅ 連續執行兩次 rebuild，結果一致（冪等性）
+- ✅ 賣光持倉後，positions 表自動刪除該筆記錄
+- ❌ positions 表**無**估值欄位（`valuation_ccy`, `market_value`, `market_price`）
+- ❌ portfolio-service 不呼叫 FX 模組（grep 無匹配）
+- ❌ valuation-service 不直連 DB（pytest guardrails 通過）
+
+**Troubleshooting**（當寫入數量/金額不符時）：
+
+1. **檢查 trades 來源**：
+   ```sql
+   SELECT user_id, symbol, asset_ccy, COUNT(*), SUM(quantity)
+   FROM trades WHERE user_id='<user_id>' GROUP BY 1,2,3;
+   ```
+
+2. **檢查分組與排序**：
+   ```bash
+   grep -A 5 "group_by\|order_by" services/portfolio-service/app/position_rebuilder.py
+   # 必須按 (user_id, symbol, asset_ccy) 分組，trade_date ASC 排序
+   ```
+
+3. **檢查 UPSERT 衝突鍵**：
+   ```sql
+   SELECT conname, pg_get_constraintdef(oid)
+   FROM pg_constraint
+   WHERE conrelid = 'positions'::regclass AND contype = 'u';
+   -- 預期：(user_id, symbol, asset_ccy) 唯一索引
+   ```
+
+4. **驗證冪等性**（連續執行兩次）：
+   ```bash
+   curl -X POST 'http://localhost:8001/portfolio/rebuild_positions?user_id=tony' | jq .symbols_count
+   curl -X POST 'http://localhost:8001/portfolio/rebuild_positions?user_id=tony' | jq .symbols_count
+   # 兩次結果應相同
+   ```
+
+---
+
+**檢查範例**（Sprint 1-4.3 驗收）：
+
+```bash
+# 確認 Position 表無估值欄位
+docker compose exec postgres psql -U investment -d investment_db -c   "SELECT column_name FROM information_schema.columns    WHERE table_name='positions'    AND column_name ~ '(valuation|market_value)';"
+# 期望輸出：(0 rows)
+
+# 確認 u_pnl 欄位存在（帳務層固定填 0）
+docker compose exec postgres psql -U investment -d investment_db -c   "SELECT column_name FROM information_schema.columns    WHERE table_name='positions' AND column_name='u_pnl';"
+# 期望輸出：'0'::numeric
+```
+
+#### 規則 4：帳務層不做折算（最陰險的發散來源）
+
+**目的**：防止帳務邏輯（positions / avg cost / realized pnl）偷偷做匯率折算，確保架構邊界清晰。
+
+**檢查命令**：
+
+```bash
+# 檢查帳務層模組是否呼叫 FX API
+grep -rn "fx\.convert\|fx\.get_rate" \
+  services/portfolio-service/app/position_rebuilder.py \
+  services/portfolio-service/app/domain/avg_cost_calculator.py \
+  services/portfolio-service/app/repositories/trades_repository.py
+
+# 期望輸出：（空，無任何匹配）
+```
+
+**禁止清單**：
+- ❌ `app/position_rebuilder.py`、`avg_cost_calculator.py`、`trades_repository.py` 等**帳務模組**禁止呼叫 `fx.convert()` 或 `fx.get_rate()`
+- ❌ 帳務層禁止匯率折算邏輯（看起來只是乘個匯率，實際上會讓架構崩潰）
+- ❌ `rebuild_positions`、`calculate_avg_cost` 等帳務 API 禁止接受 `target_ccy` 參數
+
+**允許清單**：
+- ✅ **僅估值層模組**（Sprint 1-4.B 之後的 `valuation_service.py`、`valuation_module.py`）可呼叫 FX API
+- ✅ 估值層必須透過 `app.fx.get_fx_provider()` 取得 provider（唯一入口）
+- ✅ 帳務層只負責記錄原始幣別（`asset_ccy`）和原始金額，不做任何折算
+
+**違規後果**：
+- 架構邊界模糊，未來擴充估值層時會發現匯率邏輯散落各處
+- Debug 時無法確定「這個數字是原始金額還是折算後金額」
+- 測試時無法隔離帳務邏輯與估值邏輯
+
+#### Sprint 1-4.B 驗收：valuation-service 估值 API
+
+**目的**：落實估值層 API（HTTP-only 取數），並提供可證偽 evidence。
+
+**檢查命令**：
+
+```bash
+# 1. 啟動估值服務
+docker compose up -d --build valuation-service portfolio-service
+
+# 2. 健康檢查（含 runtime guard 狀態）
+curl -s http://localhost:8005/health | jq
+# 期望欄位：service_name, portfolio_base_url, providers, runtime_guard_status
+
+# 3. 估值 API（成功案例）
+curl -s "http://localhost:8005/valuation/portfolio?user_id=tony&base_ccy=USD&as_of=2026-01-24" | jq
+# 期望：status=succeeded + evidence.positions_hash + items[].fx_rate_to_base
+
+# 4. 估值 API（失敗案例：trades_count=0）
+curl -s -i "http://localhost:8005/valuation/portfolio?user_id=empty_user" | sed -n '1,20p'
+# 期望：HTTP 409 + detail.status=precondition_failed + evidence.trades_count=0
+
+# 5. Guardrails 測試（禁止 DB driver / DB env）
+docker compose exec -T valuation-service pytest -q
+# 期望：全部通過
+```
+
+**成功輸出範例（節錄）**：
+```json
+{
+  "status": "succeeded",
+  "user_id": "tony",
+  "base_ccy": "USD",
+  "as_of": "2026-01-24",
+  "items": [
+    {
+      "symbol": "AAPL",
+      "asset_ccy": "USD",
+      "price": 18.5,
+      "fx_rate_to_base": 1.0,
+      "market_value": 185.0,
+      "unrealized_pnl":  -15.0
+    }
+  ],
+  "evidence": {
+    "positions_count": 1,
+    "positions_hash": "<sha256>",
+    "trades_count": 2,
+    "distinct_symbols_count": 1,
+    "verification_sql": {
+      "trades_count": "select count(*) from trades where user_id='tony';",
+      "distinct_symbols": "select count(distinct symbol) from trades where user_id='tony';"
+    },
+    "providers": {
+      "price_provider": "stub",
+      "fx_provider": "stub",
+      "as_of": "2026-01-24"
+    }
+  }
+}
+```
+
+**失敗輸出範例（節錄）**：
+```json
+{
+  "detail": {
+    "status": "precondition_failed",
+    "user_id": "empty_user",
+    "evidence": {
+      "trades_count": 0,
+      "distinct_symbols_count": 0
+    }
+  }
+}
 ```
 
 ---
 
-## 📊 成功指標
+### 原理說明
 
-✅ **工具腳本可執行且回傳 exit code 0**：
-```bash
-./tools/portfolio_refresh.sh tony && echo "成功"
+**為何禁止在 host venv 執行測試？**
+
+```
+Smart-Investment-stretegy/         ← repo root
+├── .venv/                          ← host venv（沒有安裝 service 依賴）
+├── services/
+│   ├── api-gateway/
+│   │   ├── requirements.txt        ← fastapi, httpx
+│   │   └── tests/
+│   └── portfolio-service/
+│       ├── requirements.txt        ← fastapi, sqlalchemy, pandas
+│       └── tests/
+│           ├── test_fx.py          ← 需要 app.fx 模組
+│           └── test_rebuild_*.py   ← 需要 app.models
+└── pytest.ini                      ← pytest 會掃描所有 services/*/tests/
 ```
 
-✅ **positions 表有資料**：
+執行流程對比：
+
+| 執行方式 | pytest 收集範圍 | Python 環境 | 結果 |
+|---------|---------------|-----------|------|
+| `pytest -q -k fx` (host venv) | **所有 services** | host venv（缺少依賴） | ❌ ModuleNotFoundError |
+| `docker compose exec portfolio-service pytest -q -k fx` | **只有 portfolio-service** | 容器內（完整依賴） | ✅ 20 passed |
+
+---
+
+## 8. 常用指令速查
+
 ```bash
-docker compose exec -T postgres psql -U investment -d investment_db -c \
-"SELECT COUNT(*) FROM positions WHERE user_id='tony';" | grep -v "count" | grep -v "-" | tr -d ' ' | grep -E '^[0-9]+$'
-# 數字 > 0
+# 查看所有服務日誌
+make docker-logs
+
+# 手動重新部署（VM 上）
+sudo /opt/radar-warroom/infra/vm/deploy.sh
+
+# 匯出 Postgres 備份
+docker compose exec -T postgres pg_dump -U investment investment_db > backups/$(date +%F).sql
+
+# 執行 portfolio-service 驗收腳本
+bash services/portfolio-service/verify_sprint_1-3.sh
+
+# 查看最近一次 sync 的可觀測性資料
+docker compose exec portfolio-service python -c "
+from app.db import get_db_session
+from app.models import SyncRun
+with get_db_session() as session:
+    latest = session.query(SyncRun).order_by(SyncRun.started_at.desc()).first()
+    if latest:
+        print(f'sheet_rows: {latest.sheet_rows_count}, valid: {latest.normalized_valid_count}, invalid: {latest.normalized_invalid_count}, duplicates: {latest.duplicates_count}')
+"
 ```
 
-✅ **evidence 包含可執行的 verification_sql**：
+## 9. Portfolio Service 可觀測性欄位參考（v0.2.3+）
+
+| 欄位 | 說明 | 正常範圍 | 異常判斷 |
+| --- | --- | --- | --- |
+| `sheet_rows_count` | Google Sheets 總列數 | > 0 | = 0 代表連線失敗或空表 |
+| `normalized_valid_count` | 成功轉換的筆數 | = inserted + duplicates | < sheet_rows 代表有格式錯誤 |
+| `normalized_invalid_count` | 格式錯誤筆數 | = 0 | > 0 時檢查日誌找出錯誤行 |
+| `duplicates_count` | 重複跳過筆數（hash 去重） | ≥ 0 | 若 = sheet_rows 代表全為舊資料 |
+| `inserted_count` | 新插入筆數 | ≥ 0 | = 0 時檢查是否 Sheets 未更新 |
+
+### Hash 版本控制機制（CANONICAL_VERSION="v1"）
+
+- `source_hash` 由 `v1:<SHA-256>` 組成，用於去重
+- 若未來欄位標準化規則改變（例如台股代號補零規則），需升級為 `v2`
+- 不同版本的 hash 不會衝突，可安全共存於同一資料表
+- **操作建議**：若需要重新計算所有交易的 hash，應在低峰時段進行批次更新
+
+---
+
+## Google Service Account 金鑰部署（docker compose secrets）
+
+### 1. 問題症狀
+- portfolio_refresh sync 500，常見錯誤：
+  - `Is a directory: '/run/secrets/google_sa.json'`
+- 需提供 `GOOGLE_SA_JSON_PATH`（推薦）或 `GOOGLE_SA_JSON`（已棄用）
+
+### 2. 根因說明
+- 若部署時直接用 `docker compose` 而未併入 `docker-compose.secrets.yml`，容器 runtime 會缺少 `GOOGLE_SA_JSON_PATH` 與金鑰檔案掛載，導致 sync 失敗。
+- pr_check 可能只走 409 fallback，未驗出金鑰缺失，導致假過。
+
+### 3. 標準解法
+- 新增 repo root `dc.sh`，統一作為 compose 入口：
+  ```sh
+  docker compose -f docker-compose.yml -f docker-compose.secrets.yml --env-file .env "$@"
+  ```
+- `tools/pr_check.sh` 內所有 `docker compose ...` 指令一律改呼叫 `./dc.sh ...`（config/ps/exec/run 全部）
+
+### 4. secrets mount 規範
+- 金鑰檔案掛載到容器 `/run/keys/google_sa.json:ro`
+- portfolio-service env 使用 `GOOGLE_SA_JSON_PATH=/run/keys/google_sa.json`
+- 不使用 `/run/secrets`（避免 mount 變成 directory）
+
+### 5. 驗收準則
+- pr_check Step 5 env keys 必須出現 `GOOGLE_SA_JSON_PATH`
+- pr_check Step 10 portfolio_refresh 顯示 completed 且 valuation API 回 200
+- evidence_leak_check 必須 pass
+
+---
+
+# Sprint 1-4.3 驗收：Positions 寫回（帳務層完成）
+
+**目標**：從 `trades` 表重算並寫入 `positions` 表，只做帳務（qty/avg_cost/realized_pnl），不做估值/匯率。
+
+**驗收命令**（可證偽）：
+
+### 1. 測試套件通過
+
 ```bash
-curl -s "http://localhost:8001/portfolio/trades/summary?user_id=tony" | jq -e '.evidence.verification_sql.trades_count'
-# 回傳 SQL 字串
+# 所有測試（無警告）
+docker compose exec -T portfolio-service pytest -q
+# 期望：93 passed, 1 skipped, <2s
+
+# rebuild 相關測試
+docker compose exec -T portfolio-service pytest -q -k rebuild
+# 期望：16+ passed（寫入、冪等性、零持倉刪除）
 ```
 
-✅ **valuation-service 前置檢查生效**：
+### 2. API 回傳欄位驗證
+
 ```bash
-curl -s -X POST http://localhost:8002/valuation/revalue \
-  -H "Content-Type: application/json" \
-  -d '{"user_id":"empty_user"}' | jq -r .status
-# 若 empty_user 無 trades，回傳 "no_data"
+# 呼叫 rebuild_positions（query 參數）
+curl -s -X POST 'http://localhost:8001/portfolio/rebuild_positions?user_id=tony' | jq
+
+# 預期輸出：
+# {
+#   "status": "succeeded",
+#   "user_id": "tony",
+#   "symbols_count": <int>,
+#   "upserted_count": <int>,
+#   "deleted_or_zeroed_count": <int>,
+#   "run_id": "<uuid>",
+#   "evidence": {
+#     "positions_columns": [
+#       "user_id", "symbol", "asset_ccy", "quantity",
+#       "avg_cost", "realized_pnl", "u_pnl", "last_updated_at"
+#     ]
+#   }
+# }
+
+# 驗證點：
+# - run_id 為 UUID 格式
+# - symbols_count >= 0
+# - evidence.positions_columns 包含 8 個欄位
+```
+
+### 3. 資料庫寫入驗證（psql）
+
+```bash
+# 查看 positions 表結構
+docker compose exec -T postgres psql -U portfolio_user -d portfolio_db \
+  -c "\d positions"
+
+# 預期欄位：
+# - quantity (numeric)
+# - avg_cost (numeric)
+# - realized_pnl (numeric)
+# - u_pnl (numeric) ← 當前固定 0
+
+# 查看實際資料
+docker compose exec -T postgres psql -U portfolio_user -d portfolio_db \
+  -c "SELECT user_id, symbol, quantity, ROUND(avg_cost::numeric, 2) as avg_cost \
+      FROM positions WHERE user_id='tony' ORDER BY symbol;"
+
+# 驗證點：
+# - u_pnl 固定為 0（不做估值）
+# - quantity, avg_cost, realized_pnl 有真實數值
+```
+
+### 4. 禁止規則驗證（Guardrails）
+
+```bash
+# 帳務層禁止 FX 模組
+grep -rn "from app.fx" services/portfolio-service/app/position_rebuilder.py
+# 期望：（空）
+
+# 帳務層禁止折算邏輯
+grep -rn "fx\.convert\|fx\.get_rate\|target_ccy" \
+  services/portfolio-service/app/position_rebuilder.py \
+  services/portfolio-service/app/domain/avg_cost_calculator.py
+# 期望：（空）
+
+# 估值層禁止 DB 直連
+docker compose exec -T valuation-service pytest -q tests/test_guardrails_no_db.py
+# 期望：5 passed
+```
+
+**可證偽檢查清單**（Sprint 1-4.3 階段）：
+
+- ✅ `rebuild_positions` 回傳包含 `run_id`, `symbols_count`, `evidence`
+- ✅ positions 表有 `u_pnl` 欄位（但值固定為 0）
+- ✅ 連續執行兩次 rebuild，結果一致（冪等性）
+- ✅ 賣光持倉後，positions 表自動刪除該筆記錄
+- ❌ positions 表**無**估值欄位（`valuation_ccy`, `market_value`, `market_price`）
+- ❌ portfolio-service 不呼叫 FX 模組（grep 無匹配）
+- ❌ valuation-service 不直連 DB（pytest guardrails 通過）
+
+**Troubleshooting**（當寫入數量/金額不符時）：
+
+1. **檢查 trades 來源**：
+   ```sql
+   SELECT user_id, symbol, asset_ccy, COUNT(*), SUM(quantity)
+   FROM trades WHERE user_id='<user_id>' GROUP BY 1,2,3;
+   ```
+
+2. **檢查分組與排序**：
+   ```bash
+   grep -A 5 "group_by\|order_by" services/portfolio-service/app/position_rebuilder.py
+   # 必須按 (user_id, symbol, asset_ccy) 分組，trade_date ASC 排序
+   ```
+
+3. **檢查 UPSERT 衝突鍵**：
+   ```sql
+   SELECT conname, pg_get_constraintdef(oid)
+   FROM pg_constraint
+   WHERE conrelid = 'positions'::regclass AND contype = 'u';
+   -- 預期：(user_id, symbol, asset_ccy) 唯一索引
+   ```
+
+4. **驗證冪等性**（連續執行兩次）：
+   ```bash
+   curl -X POST 'http://localhost:8001/portfolio/rebuild_positions?user_id=tony' | jq .symbols_count
+   curl -X POST 'http://localhost:8001/portfolio/rebuild_positions?user_id=tony' | jq .symbols_count
+   # 兩次結果應相同
+   ```
+
+---
+
+**檢查範例**（Sprint 1-4.3 驗收）：
+
+```bash
+# 確認 Position 表無估值欄位
+docker compose exec postgres psql -U investment -d investment_db -c   "SELECT column_name FROM information_schema.columns    WHERE table_name='positions'    AND column_name ~ '(valuation|market_value)';"
+# 期望輸出：(0 rows)
+
+# 確認 u_pnl 欄位存在（帳務層固定填 0）
+docker compose exec postgres psql -U investment -d investment_db -c   "SELECT column_name FROM information_schema.columns    WHERE table_name='positions' AND column_name='u_pnl';"
+# 期望輸出：'0'::numeric
+```
+
+#### 規則 4：帳務層不做折算（最陰險的發散來源）
+
+**目的**：防止帳務邏輯（positions / avg cost / realized pnl）偷偷做匯率折算，確保架構邊界清晰。
+
+**檢查命令**：
+
+```bash
+# 檢查帳務層模組是否呼叫 FX API
+grep -rn "fx\.convert\|fx\.get_rate" \
+  services/portfolio-service/app/position_rebuilder.py \
+  services/portfolio-service/app/domain/avg_cost_calculator.py \
+  services/portfolio-service/app/repositories/trades_repository.py
+
+# 期望輸出：（空，無任何匹配）
+```
+
+**禁止清單**：
+- ❌ `app/position_rebuilder.py`、`avg_cost_calculator.py`、`trades_repository.py` 等**帳務模組**禁止呼叫 `fx.convert()` 或 `fx.get_rate()`
+- ❌ 帳務層禁止匯率折算邏輯（看起來只是乘個匯率，實際上會讓架構崩潰）
+- ❌ `rebuild_positions`、`calculate_avg_cost` 等帳務 API 禁止接受 `target_ccy` 參數
+
+**允許清單**：
+- ✅ **僅估值層模組**（Sprint 1-4.B 之後的 `valuation_service.py`、`valuation_module.py`）可呼叫 FX API
+- ✅ 估值層必須透過 `app.fx.get_fx_provider()` 取得 provider（唯一入口）
+- ✅ 帳務層只負責記錄原始幣別（`asset_ccy`）和原始金額，不做任何折算
+
+**違規後果**：
+- 架構邊界模糊，未來擴充估值層時會發現匯率邏輯散落各處
+- Debug 時無法確定「這個數字是原始金額還是折算後金額」
+- 測試時無法隔離帳務邏輯與估值邏輯
+
+#### Sprint 1-4.B 驗收：valuation-service 估值 API
+
+**目的**：落實估值層 API（HTTP-only 取數），並提供可證偽 evidence。
+
+**檢查命令**：
+
+```bash
+# 1. 啟動估值服務
+docker compose up -d --build valuation-service portfolio-service
+
+# 2. 健康檢查（含 runtime guard 狀態）
+curl -s http://localhost:8005/health | jq
+# 期望欄位：service_name, portfolio_base_url, providers, runtime_guard_status
+
+# 3. 估值 API（成功案例）
+curl -s "http://localhost:8005/valuation/portfolio?user_id=tony&base_ccy=USD&as_of=2026-01-24" | jq
+# 期望：status=succeeded + evidence.positions_hash + items[].fx_rate_to_base
+
+# 4. 估值 API（失敗案例：trades_count=0）
+curl -s -i "http://localhost:8005/valuation/portfolio?user_id=empty_user" | sed -n '1,20p'
+# 期望：HTTP 409 + detail.status=precondition_failed + evidence.trades_count=0
+
+# 5. Guardrails 測試（禁止 DB driver / DB env）
+docker compose exec -T valuation-service pytest -q
+# 期望：全部通過
+```
+
+**成功輸出範例（節錄）**：
+```json
+{
+  "status": "succeeded",
+  "user_id": "tony",
+  "base_ccy": "USD",
+  "as_of": "2026-01-24",
+  "items": [
+    {
+      "symbol": "AAPL",
+      "asset_ccy": "USD",
+      "price": 18.5,
+      "fx_rate_to_base": 1.0,
+      "market_value": 185.0,
+      "unrealized_pnl":  -15.0
+    }
+  ],
+  "evidence": {
+    "positions_count": 1,
+    "positions_hash": "<sha256>",
+    "trades_count": 2,
+    "distinct_symbols_count": 1,
+    "verification_sql": {
+      "trades_count": "select count(*) from trades where user_id='tony';",
+      "distinct_symbols": "select count(distinct symbol) from trades where user_id='tony';"
+    },
+    "providers": {
+      "price_provider": "stub",
+      "fx_provider": "stub",
+      "as_of": "2026-01-24"
+    }
+  }
+}
+```
+
+**失敗輸出範例（節錄）**：
+```json
+{
+  "detail": {
+    "status": "precondition_failed",
+    "user_id": "empty_user",
+    "evidence": {
+      "trades_count": 0,
+      "distinct_symbols_count": 0
+    }
+  }
+}
 ```
 
 ---
 
-## 🔥 故障排除
+### 原理說明
 
-### 問題 1：工具腳本執行失敗（exit code != 0）
+**為何禁止在 host venv 執行測試？**
 
-**診斷**：
-```bash
-# 檢查詳細輸出
-./tools/portfolio_refresh.sh tony
-# 查看每一步的 HTTP 狀態碼與回應
-
-# 檢查 API 可達性
-curl -s http://localhost:8001/health | jq
-curl -s http://localhost:8001/portfolio/trades/summary?user_id=tony | jq
+```
+Smart-Investment-stretegy/         ← repo root
+├── .venv/                          ← host venv（沒有安裝 service 依賴）
+├── services/
+│   ├── api-gateway/
+│   │   ├── requirements.txt        ← fastapi, httpx
+│   │   └── tests/
+│   └── portfolio-service/
+│       ├── requirements.txt        ← fastapi, sqlalchemy, pandas
+│       └── tests/
+│           ├── test_fx.py          ← 需要 app.fx 模組
+│           └── test_rebuild_*.py   ← 需要 app.models
+└── pytest.ini                      ← pytest 會掃描所有 services/*/tests/
 ```
 
-**常見原因**：
-- portfolio-service 未啟動：`docker compose ps portfolio-service`
-- 網路問題：檢查 `PORTFOLIO_API` 環境變數
-- sync 失敗：Google Sheets 權限或資料格式問題
+執行流程對比：
 
-### 問題 2：trades/summary 回傳 404
+| 執行方式 | pytest 收集範圍 | Python 環境 | 結果 |
+|---------|---------------|-----------|------|
+| `pytest -q -k fx` (host venv) | **所有 services** | host venv（缺少依賴） | ❌ ModuleNotFoundError |
+| `docker compose exec portfolio-service pytest -q -k fx` | **只有 portfolio-service** | 容器內（完整依賴） | ✅ 20 passed |
 
-**診斷**：
+---
+
+## 8. 常用指令速查
+
 ```bash
-curl -v http://localhost:8001/portfolio/trades/summary?user_id=tony
+# 查看所有服務日誌
+make docker-logs
+
+# 手動重新部署（VM 上）
+sudo /opt/radar-warroom/infra/vm/deploy.sh
+
+# 匯出 Postgres 備份
+docker compose exec -T postgres pg_dump -U investment investment_db > backups/$(date +%F).sql
+
+# 執行 portfolio-service 驗收腳本
+bash services/portfolio-service/verify_sprint_1-3.sh
+
+# 查看最近一次 sync 的可觀測性資料
+docker compose exec portfolio-service python -c "
+from app.db import get_db_session
+from app.models import SyncRun
+with get_db_session() as session:
+    latest = session.query(SyncRun).order_by(SyncRun.started_at.desc()).first()
+    if latest:
+        print(f'sheet_rows: {latest.sheet_rows_count}, valid: {latest.normalized_valid_count}, invalid: {latest.normalized_invalid_count}, duplicates: {latest.duplicates_count}')
+"
 ```
 
-**解決**：
+## 9. Portfolio Service 可觀測性欄位參考（v0.2.3+）
+
+| 欄位 | 說明 | 正常範圍 | 異常判斷 |
+| --- | --- | --- | --- |
+| `sheet_rows_count` | Google Sheets 總列數 | > 0 | = 0 代表連線失敗或空表 |
+| `normalized_valid_count` | 成功轉換的筆數 | = inserted + duplicates | < sheet_rows 代表有格式錯誤 |
+| `normalized_invalid_count` | 格式錯誤筆數 | = 0 | > 0 時檢查日誌找出錯誤行 |
+| `duplicates_count` | 重複跳過筆數（hash 去重） | ≥ 0 | 若 = sheet_rows 代表全為舊資料 |
+| `inserted_count` | 新插入筆數 | ≥ 0 | = 0 時檢查是否 Sheets 未更新 |
+
+### Hash 版本控制機制（CANONICAL_VERSION="v1"）
+
+- `source_hash` 由 `v1:<SHA-256>` 組成，用於去重
+- 若未來欄位標準化規則改變（例如台股代號補零規則），需升級為 `v2`
+- 不同版本的 hash 不會衝突，可安全共存於同一資料表
+- **操作建議**：若需要重新計算所有交易的 hash，應在低峰時段進行批次更新
+
+---
+
+## Google Service Account 金鑰部署（docker compose secrets）
+
+### 1. 問題症狀
+- portfolio_refresh sync 500，常見錯誤：
+  - `Is a directory: '/run/secrets/google_sa.json'`
+- 需提供 `GOOGLE_SA_JSON_PATH`（推薦）或 `GOOGLE_SA_JSON`（已棄用）
+
+### 2. 根因說明
+- 若部署時直接用 `docker compose` 而未併入 `docker-compose.secrets.yml`，容器 runtime 會缺少 `GOOGLE_SA_JSON_PATH` 與金鑰檔案掛載，導致 sync 失敗。
+- pr_check 可能只走 409 fallback，未驗出金鑰缺失，導致假過。
+
+### 3. 標準解法
+- 新增 repo root `dc.sh`，統一作為 compose 入口：
+  ```sh
+  docker compose -f docker-compose.yml -f docker-compose.secrets.yml --env-file .env "$@"
+  ```
+- `tools/pr_check.sh` 內所有 `docker compose ...` 指令一律改呼叫 `./dc.sh ...`（config/ps/exec/run 全部）
+
+### 4. secrets mount 規範
+- 金鑰檔案掛載到容器 `/run/keys/google_sa.json:ro`
+- portfolio-service env 使用 `GOOGLE_SA_JSON_PATH=/run/keys/google_sa.json`
+- 不使用 `/run/secrets`（避免 mount 變成 directory）
+
+### 5. 驗收準則
+- pr_check Step 5 env keys 必須出現 `GOOGLE_SA_JSON_PATH`
+- pr_check Step 10 portfolio_refresh 顯示 completed 且 valuation API 回 200
+- evidence_leak_check 必須 pass
+
+---
+
+# Sprint 1-4.3 驗收：Positions 寫回（帳務層完成）
+
+**目標**：從 `trades` 表重算並寫入 `positions` 表，只做帳務（qty/avg_cost/realized_pnl），不做估值/匯率。
+
+**驗收命令**（可證偽）：
+
+### 1. 測試套件通過
+
 ```bash
-# 確認 portfolio-service 已重建（包含新端點）
-docker compose up -d --build portfolio-service
-docker compose logs -f portfolio-service
+# 所有測試（無警告）
+docker compose exec -T portfolio-service pytest -q
+# 期望：93 passed, 1 skipped, <2s
+
+# rebuild 相關測試
+docker compose exec -T portfolio-service pytest -q -k rebuild
+# 期望：16+ passed（寫入、冪等性、零持倉刪除）
 ```
 
-### 問題 3：valuation-service 沒有攔截 trades=0
+### 2. API 回傳欄位驗證
 
-**診斷**：
 ```bash
-# 檢查 valuation-service 是否已重建
-docker compose logs valuation-service | grep "trades/summary"
+# 呼叫 rebuild_positions（query 參數）
+curl -s -X POST 'http://localhost:8001/portfolio/rebuild_positions?user_id=tony' | jq
 
-# 測試 trades=0 的情況
-curl -s -X POST http://localhost:8002/valuation/revalue \
-  -H "Content-Type: application/json" \
-  -d '{"user_id":"definitely_empty_user"}' | jq .status
+# 預期輸出：
+# {
+#   "status": "succeeded",
+#   "user_id": "tony",
+#   "symbols_count": <int>,
+#   "upserted_count": <int>,
+#   "deleted_or_zeroed_count": <int>,
+#   "run_id": "<uuid>",
+#   "evidence": {
+#     "positions_columns": [
+#       "user_id", "symbol", "asset_ccy", "quantity",
+#       "avg_cost", "realized_pnl", "u_pnl", "last_updated_at"
+#     ]
+#   }
+# }
+
+# 驗證點：
+# - run_id 為 UUID 格式
+# - symbols_count >= 0
+# - evidence.positions_columns 包含 8 個欄位
 ```
 
-**解決**：
+### 3. 資料庫寫入驗證（psql）
+
 ```bash
-# 重建 valuation-service
-docker compose up -d --build valuation-service
+# 查看 positions 表結構
+docker compose exec -T postgres psql -U portfolio_user -d portfolio_db \
+  -c "\d positions"
+
+# 預期欄位：
+# - quantity (numeric)
+# - avg_cost (numeric)
+# - realized_pnl (numeric)
+# - u_pnl (numeric) ← 當前固定 0
+
+# 查看實際資料
+docker compose exec -T postgres psql -U portfolio_user -d portfolio_db \
+  -c "SELECT user_id, symbol, quantity, ROUND(avg_cost::numeric, 2) as avg_cost \
+      FROM positions WHERE user_id='tony' ORDER BY symbol;"
+
+# 驗證點：
+# - u_pnl 固定為 0（不做估值）
+# - quantity, avg_cost, realized_pnl 有真實數值
+```
+
+### 4. 禁止規則驗證（Guardrails）
+
+```bash
+# 帳務層禁止 FX 模組
+grep -rn "from app.fx" services/portfolio-service/app/position_rebuilder.py
+# 期望：（空）
+
+# 帳務層禁止折算邏輯
+grep -rn "fx\.convert\|fx\.get_rate\|target_ccy" \
+  services/portfolio-service/app/position_rebuilder.py \
+  services/portfolio-service/app/domain/avg_cost_calculator.py
+# 期望：（空）
+
+# 估值層禁止 DB 直連
+docker compose exec -T valuation-service pytest -q tests/test_guardrails_no_db.py
+# 期望：5 passed
+```
+
+**可證偽檢查清單**（Sprint 1-4.3 階段）：
+
+- ✅ `rebuild_positions` 回傳包含 `run_id`, `symbols_count`, `evidence`
+- ✅ positions 表有 `u_pnl` 欄位（但值固定為 0）
+- ✅ 連續執行兩次 rebuild，結果一致（冪等性）
+- ✅ 賣光持倉後，positions 表自動刪除該筆記錄
+- ❌ positions 表**無**估值欄位（`valuation_ccy`, `market_value`, `market_price`）
+- ❌ portfolio-service 不呼叫 FX 模組（grep 無匹配）
+- ❌ valuation-service 不直連 DB（pytest guardrails 通過）
+
+**Troubleshooting**（當寫入數量/金額不符時）：
+
+1. **檢查 trades 來源**：
+   ```sql
+   SELECT user_id, symbol, asset_ccy, COUNT(*), SUM(quantity)
+   FROM trades WHERE user_id='<user_id>' GROUP BY 1,2,3;
+   ```
+
+2. **檢查分組與排序**：
+   ```bash
+   grep -A 5 "group_by\|order_by" services/portfolio-service/app/position_rebuilder.py
+   # 必須按 (user_id, symbol, asset_ccy) 分組，trade_date ASC 排序
+   ```
+
+3. **檢查 UPSERT 衝突鍵**：
+   ```sql
+   SELECT conname, pg_get_constraintdef(oid)
+   FROM pg_constraint
+   WHERE conrelid = 'positions'::regclass AND contype = 'u';
+   -- 預期：(user_id, symbol, asset_ccy) 唯一索引
+   ```
+
+4. **驗證冪等性**（連續執行兩次）：
+   ```bash
+   curl -X POST 'http://localhost:8001/portfolio/rebuild_positions?user_id=tony' | jq .symbols_count
+   curl -X POST 'http://localhost:8001/portfolio/rebuild_positions?user_id=tony' | jq .symbols_count
+   # 兩次結果應相同
+   ```
+
+---
+
+**檢查範例**（Sprint 1-4.3 驗收）：
+
+```bash
+# 確認 Position 表無估值欄位
+docker compose exec postgres psql -U investment -d investment_db -c   "SELECT column_name FROM information_schema.columns    WHERE table_name='positions'    AND column_name ~ '(valuation|market_value)';"
+# 期望輸出：(0 rows)
+
+# 確認 u_pnl 欄位存在（帳務層固定填 0）
+docker compose exec postgres psql -U investment -d investment_db -c   "SELECT column_name FROM information_schema.columns    WHERE table_name='positions' AND column_name='u_pnl';"
+# 期望輸出：'0'::numeric
+```
+
+#### 規則 4：帳務層不做折算（最陰險的發散來源）
+
+**目的**：防止帳務邏輯（positions / avg cost / realized pnl）偷偷做匯率折算，確保架構邊界清晰。
+
+**檢查命令**：
+
+```bash
+# 檢查帳務層模組是否呼叫 FX API
+grep -rn "fx\.convert\|fx\.get_rate" \
+  services/portfolio-service/app/position_rebuilder.py \
+  services/portfolio-service/app/domain/avg_cost_calculator.py \
+  services/portfolio-service/app/repositories/trades_repository.py
+
+# 期望輸出：（空，無任何匹配）
+```
+
+**禁止清單**：
+- ❌ `app/position_rebuilder.py`、`avg_cost_calculator.py`、`trades_repository.py` 等**帳務模組**禁止呼叫 `fx.convert()` 或 `fx.get_rate()`
+- ❌ 帳務層禁止匯率折算邏輯（看起來只是乘個匯率，實際上會讓架構崩潰）
+- ❌ `rebuild_positions`、`calculate_avg_cost` 等帳務 API 禁止接受 `target_ccy` 參數
+
+**允許清單**：
+- ✅ **僅估值層模組**（Sprint 1-4.B 之後的 `valuation_service.py`、`valuation_module.py`）可呼叫 FX API
+- ✅ 估值層必須透過 `app.fx.get_fx_provider()` 取得 provider（唯一入口）
+- ✅ 帳務層只負責記錄原始幣別（`asset_ccy`）和原始金額，不做任何折算
+
+**違規後果**：
+- 架構邊界模糊，未來擴充估值層時會發現匯率邏輯散落各處
+- Debug 時無法確定「這個數字是原始金額還是折算後金額」
+- 測試時無法隔離帳務邏輯與估值邏輯
+
+#### Sprint 1-4.B 驗收：valuation-service 估值 API
+
+**目的**：落實估值層 API（HTTP-only 取數），並提供可證偽 evidence。
+
+**檢查命令**：
+
+```bash
+# 1. 啟動估值服務
+docker compose up -d --build valuation-service portfolio-service
+
+# 2. 健康檢查（含 runtime guard 狀態）
+curl -s http://localhost:8005/health | jq
+# 期望欄位：service_name, portfolio_base_url, providers, runtime_guard_status
+
+# 3. 估值 API（成功案例）
+curl -s "http://localhost:8005/valuation/portfolio?user_id=tony&base_ccy=USD&as_of=2026-01-24" | jq
+# 期望：status=succeeded + evidence.positions_hash + items[].fx_rate_to_base
+
+# 4. 估值 API（失敗案例：trades_count=0）
+curl -s -i "http://localhost:8005/valuation/portfolio?user_id=empty_user" | sed -n '1,20p'
+# 期望：HTTP 409 + detail.status=precondition_failed + evidence.trades_count=0
+
+# 5. Guardrails 測試（禁止 DB driver / DB env）
+docker compose exec -T valuation-service pytest -q
+# 期望：全部通過
+```
+
+**成功輸出範例（節錄）**：
+```json
+{
+  "status": "succeeded",
+  "user_id": "tony",
+  "base_ccy": "USD",
+  "as_of": "2026-01-24",
+  "items": [
+    {
+      "symbol": "AAPL",
+      "asset_ccy": "USD",
+      "price": 18.5,
+      "fx_rate_to_base": 1.0,
+      "market_value": 185.0,
+      "unrealized_pnl":  -15.0
+    }
+  ],
+  "evidence": {
+    "positions_count": 1,
+    "positions_hash": "<sha256>",
+    "trades_count": 2,
+    "distinct_symbols_count": 1,
+    "verification_sql": {
+      "trades_count": "select count(*) from trades where user_id='tony';",
+      "distinct_symbols": "select count(distinct symbol) from trades where user_id='tony';"
+    },
+    "providers": {
+      "price_provider": "stub",
+      "fx_provider": "stub",
+      "as_of": "2026-01-24"
+    }
+  }
+}
+```
+
+**失敗輸出範例（節錄）**：
+```json
+{
+  "detail": {
+    "status": "precondition_failed",
+    "user_id": "empty_user",
+    "evidence": {
+      "trades_count": 0,
+      "distinct_symbols_count": 0
+    }
+  }
+}
 ```
 
 ---
+
+### 原理說明
+
+**為何禁止在 host venv 執行測試？**
+
+```
+Smart-Investment-stretegy/         ← repo root
+├── .venv/                          ← host venv（沒有安裝 service 依賴）
+├── services/
+│   ├── api-gateway/
+│   │   ├── requirements.txt        ← fastapi, httpx
+│   │   └── tests/
+│   └── portfolio-service/
+│       ├── requirements.txt        ← fastapi, sqlalchemy, pandas
+│       └── tests/
+│           ├── test_fx.py          ← 需要 app.fx 模組
+│           └── test_rebuild_*.py   ← 需要 app.models
+└── pytest.ini                      ← pytest 會掃描所有 services/*/tests/
+```
+
+執行流程對比：
+
+| 執行方式 | pytest 收集範圍 | Python 環境 | 結果 |
+|---------|---------------|-----------|------|
+| `pytest -q -k fx` (host venv) | **所有 services** | host venv（缺少依賴） | ❌ ModuleNotFoundError |
+| `docker compose exec portfolio-service pytest -q -k fx` | **只有 portfolio-service** | 容器內（完整依賴） | ✅ 20 passed |
+
+---
+
+## 8. 常用指令速查
+
+```bash
+# 查看所有服務日誌
+make docker-logs
+
+# 手動重新部署（VM 上）
+sudo /opt/radar-warroom/infra/vm/deploy.sh
+
+# 匯出 Postgres 備份
+docker compose exec -T postgres pg_dump -U investment investment_db > backups/$(date +%F).sql
+
+# 執行 portfolio-service 驗收腳本
+bash services/portfolio-service/verify_sprint_1-3.sh

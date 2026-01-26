@@ -143,6 +143,7 @@ class RebuildPositionsResponse(BaseModel):
     upserted_count: int = Field(..., ge=0, description="寫入/更新的筆數")
     deleted_or_zeroed_count: int = Field(..., ge=0, description="刪除或歸零的筆數")
     run_id: str = Field(..., description="本次執行識別碼")
+    positions_hash: Optional[str] = Field(None, description="持倉狀態的 SHA256 Hash")
     evidence: dict = Field(..., description="可證偽的結構化證據")
 
 

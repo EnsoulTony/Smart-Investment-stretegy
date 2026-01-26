@@ -81,12 +81,11 @@ class TestRebuildPositionsPreview:
         """
         response = client.get(
             "/portfolio/rebuild_positions/preview?user_id=user_with_no_trades"
-        
+        )
         data = response.json()
-        
-        assert data["status"] == "succeeded"
-        assert data["user_id"] == "user_with_no_trades"
-        assert data["symbols"] == [], "無交易記錄時，symbols 應為空列表"
+    
+        assert data["status"] == "preview"
+        assert data["positions"] == []
         assert data["warnings"] == []
     
     def test_preview_with_single_buy_calculates_correctly(self, client, db_session):
@@ -96,7 +95,7 @@ class TestRebuildPositionsPreview:
         - 買入 100 股 AAPL @ 150 元（手續費 1.5）
         
         驗證：
-        - symbols 長度 = 1
+        - positions 長度 = 1
         - qty = 100
         - avg_cost = (100*150 + 1.5) / 100 = 150.015
         - realized_pnl = 0（尚未賣出）
@@ -126,16 +125,16 @@ class TestRebuildPositionsPreview:
         # 呼叫 API
         response = client.get(
             "/portfolio/rebuild_positions/preview?user_id=test_user_1"
-        
+        )
         data = response.json()
         
         # 驗證基本結構
-        assert data["status"] == "succeeded"
+        assert data["status"] == "preview"
         assert data["user_id"] == "test_user_1"
-        assert len(data["symbols"]) == 1, "應有 1 個標的"
+        assert len(data["positions"]) == 1, "應有 1 個標的"
         
         # 驗證計算結果
-        pos = data["symbols"][0]
+        pos = data["positions"][0]
         assert pos["symbol"] == "AAPL"
         assert pos["asset_ccy"] == "USD"
         assert pos["qty"] == 100.0
@@ -195,12 +194,13 @@ class TestRebuildPositionsPreview:
         # 呼叫 API
         response = client.get(
             "/portfolio/rebuild_positions/preview?user_id=test_user_2"
+        )
         
         data = response.json()
         
-        assert len(data["symbols"]) == 1
+        assert len(data["positions"]) == 1
         
-        pos = data["symbols"][0]
+        pos = data["positions"][0]
         assert pos["symbol"] == "AAPL"
         assert pos["qty"] == 60.0, "剩餘持倉應為 60 股"
         assert pos["avg_cost"] == 150.015, "平均成本不應改變"
@@ -217,7 +217,7 @@ class TestRebuildPositionsPreview:
         - QQQ: 買入 200 股 @ 380
         
         驗證：
-        - symbols 長度 = 3
+        - positions 長度 = 3
         - 每個標的獨立計算
         """
         trades = [
@@ -268,17 +268,17 @@ class TestRebuildPositionsPreview:
         # 呼叫 API
         response = client.get(
             "/portfolio/rebuild_positions/preview?user_id=test_user_3"
-        
+        )
         data = response.json()
         
-        assert len(data["symbols"]) == 3, "應有 3 個標的"
+        assert len(data["positions"]) == 3, "應有 3 個標的"
         
         # 驗證所有標的都出現
-        symbols = {pos["symbol"] for pos in data["symbols"]}
+        symbols = {pos["symbol"] for pos in data["positions"]}
         assert symbols == {"AAPL", "MSFT", "QQQ"}
         
         # 驗證每個標的的計算
-        for pos in data["symbols"]:
+        for pos in data["positions"]:
             assert pos["qty"] > 0, f"{pos['symbol']} 的持倉數量應 > 0"
             assert pos["avg_cost"] > 0, f"{pos['symbol']} 的均價應 > 0"
             assert pos["trades_count"] == 1, f"{pos['symbol']} 應有 1 筆交易"
@@ -307,29 +307,29 @@ class TestRebuildPositionsPreview:
         # 呼叫 API
         response = client.get(
             "/portfolio/rebuild_positions/preview?user_id=test_user_4"
-        
+        )
         data = response.json()
         
         # 驗證頂層欄位
         assert "status" in data
         assert "user_id" in data
-        assert "symbols" in data
+        assert "positions" in data
         assert "warnings" in data
         
         assert isinstance(data["status"], str)
         assert isinstance(data["user_id"], str)
-        assert isinstance(data["symbols"], list)
+        assert isinstance(data["positions"], list)
         assert isinstance(data["warnings"], list)
         
-        # 驗證 symbols 內的欄位
-        if len(data["symbols"]) > 0:
-            pos = data["symbols"][0]
+        # 驗證 positions 內的欄位
+        if len(data["positions"]) > 0:
+            pos = data["positions"][0]
             required_fields = [
                 "symbol", "asset_ccy", "qty", "avg_cost",
                 "realized_pnl", "total_fee", "trades_count"
             ]
             for field in required_fields:
-                assert field in pos, f"symbols 應包含 {field} 欄位"
+                assert field in pos, f"positions 應包含 {field} 欄位"
             
             assert isinstance(pos["symbol"], str)
             assert isinstance(pos["asset_ccy"], str)

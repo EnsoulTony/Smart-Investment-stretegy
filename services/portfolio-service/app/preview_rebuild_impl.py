@@ -87,7 +87,7 @@ def preview_rebuild(user_id: str, db: Session) -> Dict:
                 "distinct_symbols_count": len(grouped_trades)
             },
             "positions_count": len(computed_positions),
-            "computed_positions_hash": positions_hash,
+            "positions_hash": positions_hash,
             "verification_sql": {
                 "trades_count": f"select count(*) from trades where user_id='{user_id}';",
                 "distinct_symbols": f"select count(distinct symbol) from trades where user_id='{user_id}';",
@@ -98,8 +98,8 @@ def preview_rebuild(user_id: str, db: Session) -> Dict:
         result = {
             "status": "preview",
             "user_id": user_id,
-            "computed_positions_count": len(computed_positions),
-            "computed_positions_hash": positions_hash,
+            "positions_count": len(computed_positions),
+            "positions_hash": positions_hash,
             "positions": computed_positions,  # 完整列表或前N筆
             "evidence": evidence
         }

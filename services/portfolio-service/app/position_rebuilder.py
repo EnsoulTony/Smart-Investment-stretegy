@@ -204,6 +204,7 @@ class PositionRebuilder:
                     }
                     for p in positions_to_insert
                 ]
+                # 即使 positions 為空也要 hash
                 positions_hash = compute_positions_hash(positions_for_hash)
 
                 # 獲取當前日期
@@ -353,12 +354,24 @@ def preview_rebuild(user_id: str, db: Session) -> Dict:
 
         # 步驟 4: 每組計算均價法
         symbols_result = []
+        positions_for_hash_calc = []
         warnings = []
 
         for (symbol, asset_ccy), group_trades in grouped_trades.items():
             try:
                 state = compute_avg_cost(group_trades)
 
+                # For hash calculation, use precise Decimal values
+                positions_for_hash_calc.append({
+                    "symbol": symbol,
+                    "asset_ccy": asset_ccy,
+                    "quantity": state.qty,
+                    "avg_cost": state.avg_cost,
+                    "realized_pnl": state.realized_pnl,
+                    "u_pnl": 0
+                })
+
+                # For JSON response, convert Decimals to floats
                 symbols_result.append({
                     "symbol": symbol,
                     "asset_ccy": asset_ccy,
@@ -384,12 +397,24 @@ def preview_rebuild(user_id: str, db: Session) -> Dict:
                 warnings.append(warning_msg)
                 logger.exception(warning_msg)
 
-        # 步驟 5: 組裝回傳結果
+        # 計算 positions_hash using the precise list
+        positions_hash = compute_positions_hash(positions_for_hash_calc)
+
         result = {
-            "status": "succeeded",
+            "status": "preview",
             "user_id": user_id,
-            "symbols": symbols_result,
-            "warnings": warnings
+            "positions_count": len(symbols_result),
+            "positions_hash": positions_hash,
+            "positions": symbols_result,
+            "warnings": warnings,
+            "trades_count": len(trades_pydantic),
+            "distinct_symbols_count": len(grouped_trades),
+            "evidence": {
+                "positions_hash": positions_hash,
+                "positions_count": len(symbols_result),
+                "trades_count": len(trades_pydantic),
+                "distinct_symbols_count": len(grouped_trades)
+            }
         }
 
         logger.info(

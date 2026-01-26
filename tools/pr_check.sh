@@ -4,7 +4,7 @@
 #
 # 檢查項目：
 # 1. Forbidden tokens 靜態掃描
-# 2. docker compose config 展開後 env 驗證
+# 2. ./dc.sh config 展開後 env 驗證
 # 3. valuation-service API JSON 合約檢查
 # 4. runtime guard 注入檢查
 # 5. pytest（容器內）
@@ -104,10 +104,10 @@ pass
 # ============================================================================
 # Step 3: Compose config secrets leak guard
 # ==============================================================================
-step "Compose config secrets leak guard" "docker compose config | grep -E 'GOOGLE_SA_JSON:|BEGIN PRIVATE KEY'"
+step "Compose config secrets leak guard" "./dc.sh config | grep -E 'GOOGLE_SA_JSON:|BEGIN PRIVATE KEY'"
 
 echo "Checking for secrets leakage in compose config..."
-COMPOSE_CONFIG_FULL=$(docker compose config 2>/dev/null) || fail "PRECHECK-COMPOSE" "docker compose config failed"
+COMPOSE_CONFIG_FULL=$(./dc.sh config 2>/dev/null) || fail "PRECHECK-COMPOSE" "./dc.sh config failed"
 
 # Check 1: GOOGLE_SA_JSON (entire JSON in env)
 MATCHES_JSON=$(echo "$COMPOSE_CONFIG_FULL" | grep -c "GOOGLE_SA_JSON:" || true)
@@ -129,9 +129,9 @@ fi
 pass
 
 # ==============================================================================
-# Step 4: docker compose config env allow-list - valuation-service
+# Step 4: ./dc.sh config env allow-list - valuation-service
 # ============================================================================
-step "docker compose config env allow-list: valuation-service" "docker compose config"
+step "docker compose config env allow-list: valuation-service" "./dc.sh config"
 
 # Reuse COMPOSE_CONFIG_FULL from Step 3
 COMPOSE_CONFIG="$COMPOSE_CONFIG_FULL"
@@ -214,9 +214,9 @@ fi
 pass
 
 # ============================================================================
-# Step 5: docker compose config env checks - portfolio-service
+# Step 5: ./dc.sh config env checks - portfolio-service
 # ============================================================================
-step "docker compose config env checks: portfolio-service" "docker compose config"
+step "docker compose config env checks: portfolio-service" "./dc.sh config"
 
 PORT_KEYS=( $(get_env_keys portfolio-service) )
 if [ ${#PORT_KEYS[@]} -eq 0 ]; then
@@ -265,24 +265,24 @@ pass
 # ============================================================================
 # Step 6: Check services are running
 # ============================================================================
-step "Check services are running" "docker compose ps --status running --services"
+step "Check services are running" "./dc.sh ps --status running --services"
 
-RUNNING_SERVICES=$(docker compose ps --status running --services 2>/dev/null || true)
+RUNNING_SERVICES=$(./dc.sh ps --status running --services 2>/dev/null || true)
 
 if ! echo "$RUNNING_SERVICES" | grep -qx "portfolio-service"; then
-  fail "PRECHECK-SVC-RUNNING" "portfolio-service not running; run: docker compose up -d portfolio-service"
+  fail "PRECHECK-SVC-RUNNING" "portfolio-service not running; run: ./dc.sh up -d portfolio-service"
 fi
 if ! echo "$RUNNING_SERVICES" | grep -qx "valuation-service"; then
-  fail "PRECHECK-SVC-RUNNING" "valuation-service not running; run: docker compose up -d valuation-service"
+  fail "PRECHECK-SVC-RUNNING" "valuation-service not running; run: ./dc.sh up -d valuation-service"
 fi
 pass
 
 # ============================================================================
 # Step 7: Runtime env sanity check (valuation-service)
 # ============================================================================
-step "Runtime env sanity (valuation-service)" "docker compose exec -T valuation-service python -"
+step "Runtime env sanity (valuation-service)" "./dc.sh exec -T valuation-service python -"
 
-docker compose exec -T valuation-service python - <<'PY'
+./dc.sh exec -T valuation-service python - <<'PY'
 import os
 import sys
 
@@ -326,11 +326,11 @@ pass
 # ============================================================================
 # Step 8: Runtime guard injection test (valuation-service)
 # ============================================================================
-step "Runtime guard injection test" "docker compose run --rm -e DATABASE_URL=x valuation-service python -c 'from app.guardrails import check_and_exit; check_and_exit()'"
+step "Runtime guard injection test" "./dc.sh run --rm -e DATABASE_URL=x valuation-service python -c 'from app.guardrails import check_and_exit; check_and_exit()'"
 
 # 這個測試預期要失敗（non-zero exit）
 set +e
-GUARD_OUTPUT=$(docker compose run --rm -e DATABASE_URL=test_injection valuation-service python -c "from app.guardrails import check_and_exit; check_and_exit()" 2>&1)
+GUARD_OUTPUT=$(./dc.sh run --rm -e DATABASE_URL=test_injection valuation-service python -c "from app.guardrails import check_and_exit; check_and_exit()" 2>&1)
 GUARD_EXIT=$?
 set -e
 
@@ -529,29 +529,29 @@ fi
 # ==============================================================================
 # Step 11: pytest (container) - portfolio-service
 # ============================================================================
-step "pytest (container): portfolio-service" "docker compose exec -T portfolio-service pytest -q"
-docker compose exec -T portfolio-service pytest -q
+step "pytest (container): portfolio-service" "./dc.sh exec -T portfolio-service pytest -q"
+./dc.sh exec -T portfolio-service pytest -q
 pass
 
 # ============================================================================
 # Step 12: pytest collect-only (portfolio-service)
 # ============================================================================
-step "pytest collect-only (portfolio-service)" "docker compose exec -T portfolio-service pytest -q --collect-only | tail -n 50"
-docker compose exec -T portfolio-service pytest -q --collect-only | tail -n 50
+step "pytest collect-only (portfolio-service)" "./dc.sh exec -T portfolio-service pytest -q --collect-only | tail -n 50"
+./dc.sh exec -T portfolio-service pytest -q --collect-only | tail -n 50
 pass
 
 # ============================================================================
 # Step 13: pytest (container) - valuation-service
 # ============================================================================
-step "pytest (container): valuation-service" "docker compose exec -T valuation-service pytest -q"
-docker compose exec -T valuation-service pytest -q
+step "pytest (container): valuation-service" "./dc.sh exec -T valuation-service pytest -q"
+./dc.sh exec -T valuation-service pytest -q
 pass
 
 # ============================================================================
 # Step 14: pytest collect-only (valuation-service)
 # ============================================================================
-step "pytest collect-only (valuation-service)" "docker compose exec -T valuation-service pytest -q --collect-only | tail -n 50"
-docker compose exec -T valuation-service pytest -q --collect-only | tail -n 50
+step "pytest collect-only (valuation-service)" "./dc.sh exec -T valuation-service pytest -q --collect-only | tail -n 50"
+./dc.sh exec -T valuation-service pytest -q --collect-only | tail -n 50
 pass
 
 # ============================================================================

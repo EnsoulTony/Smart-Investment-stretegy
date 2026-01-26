@@ -165,9 +165,8 @@ def test_preview_and_write_hash_consistency(
     preview_result = preview_response.json()
     
     assert preview_result["status"] == "preview", f"preview status 不是 preview: {preview_result}"
-    preview_hash = preview_result.get("computed_positions_hash")
-    assert preview_hash, "preview 沒有回傳 computed_positions_hash"
-    
+    preview_hash = preview_result.get("positions_hash")
+    assert preview_hash, "preview 沒有回傳 positions_hash"    
     # Act 2: write
     write_response = client.post(
         f"/portfolio/rebuild_positions?user_id={user_id}&require_trades=1"

@@ -21,6 +21,7 @@ from app.avg_cost_calculator import compute_avg_cost
 from collections import defaultdict
 from decimal import Decimal
 from datetime import date
+from .position_rebuilder import preview_rebuild
 
 SERVICE_NAME = os.getenv("SERVICE_NAME", "portfolio-service")
 
@@ -389,13 +390,16 @@ def preview_rebuild_positions(
                 }
             )
         
-        result = preview_rebuild(user_id=user_id, db=db)
-        
+        result_data = preview_rebuild(user_id=user_id, db=db)
+
+        # Create a new dictionary from the result to avoid modifying the original
+        result = dict(result_data)
+
         # 補充 require_trades 和 trades 計數
         result["require_trades"] = require_trades
         result["trades_count"] = trades_count
         result["distinct_symbols_count"] = distinct_symbols_count
-        
+
         # 補充 verification_sql
         if "evidence" not in result:
             result["evidence"] = {}
@@ -410,7 +414,20 @@ def preview_rebuild_positions(
             "distinct_symbols": f"select count(distinct symbol) from trades where user_id='{user_id}';",
             "positions_count": "N/A (preview mode, no DB write)"
         }
-        
+
+        # symbols 欄位改為 positions，確保一致
+        if "symbols" in result:
+            result["positions"] = result.pop("symbols")
+
+        # status 欄位強制為 preview
+        result["status"] = "preview"
+
+        # 移除舊欄位 computed_positions_hash，確保只回傳 positions_hash
+        if "computed_positions_hash" in result:
+            del result["computed_positions_hash"]
+        if "computed_positions_count" in result:
+            del result["computed_positions_count"]
+
         return result
         
     except HTTPException:
