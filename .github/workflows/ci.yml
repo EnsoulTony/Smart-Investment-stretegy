@@ -477,6 +477,8 @@ jobs:
       # ========================================================================
       # Step 15: Collect container logs on failure or always
       # ========================================================================
+      - name: Create artifacts directory
+        run: mkdir -p artifacts
       - name: Collect container status and logs
         if: always() && steps.detect_mode.outputs.mode == 'full'
         run: |
