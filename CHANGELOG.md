@@ -1,5 +1,20 @@
 # CHANGELOG.md｜版本沿革
 
+## [0.2.4] - 2026-01-27（Sprint 3：News N1/N3 signals + Core Holdings 設定落地）
+- **news-service：新增可驗收的新聞訊號端點**
+  - 新增 `GET /news/signals?user_id=tony&as_of=YYYY-MM-DD`
+  - 以「打分制」產出 `tier=N1|N3`（固定規則、固定門檻、可回歸）
+  - 每則 item 必含 `falsifiable_triggers`（>=1）以支援可證偽驗收
+  - Stub provider：固定輸出 2 則 N1 + 3 則 N3（deterministic）
+- **portfolio-service：核心持股設定改由本地 DB 管理（Google Sheets 只做初始交易來源）**
+  - trades 表新增 `is_core` 欄位（預設 false，用於未來 UI 顯示/同步）
+  - 新增 `core_holdings` 表，保存使用者勾選的核心持股清單
+  - 新增 `GET /portfolio/core_holdings` 與 `POST /portfolio/core_holdings`（全量覆寫 symbols）
+- **驗收與測試**
+  - 新增 `tools/verify_sprint_3.sh`：build → migrate → health → contract → tier 統計 → triggers → pytest → PASSED
+  - 新增 news-service / portfolio-service 單元測試覆蓋 contract、deterministic 與 core_holdings API
+- 更新 `API_CONTRACTS.md` / `ARCHITECTURE.md` / `Development.md`：補齊 Sprint 3 資料流與端點契約
+
 ## [0.2.3] - 2026-01-23（Portfolio Service 可觀測性與 Hash 版本控制加固）
 - **source_hash 版本控制**：避免未來 canonical 規則變動造成 hash 衝突
   - 在 trade_normalizer.py 加入 `CANONICAL_VERSION = "v1"` 常數

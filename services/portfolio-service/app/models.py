@@ -7,12 +7,14 @@
 """
 
 from datetime import datetime, timezone
-from sqlalchemy import Column, Integer, String, Numeric, DateTime, Text, UniqueConstraint, Index
+from sqlalchemy import Column, Integer, String, Numeric, DateTime, Text, UniqueConstraint, Index, Boolean
+import sqlalchemy as sa
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import synonym
 import uuid
 
 from app.db import Base
+from app.models_core import CoreHolding  # noqa: F401 - exported for Alembic autoload
 
 
 class Trade(Base):
@@ -32,6 +34,7 @@ class Trade(Base):
     fee = Column(Numeric, nullable=False, default=0)
     trade_date = Column(DateTime(timezone=True), nullable=False)
     broker = Column(Text, nullable=False)
+    is_core = Column(Boolean, nullable=False, server_default=sa.text('false'))
     source_row_id = Column(Text, nullable=True)
     source_hash = Column(Text, nullable=False, unique=True)
     created_at = Column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc))

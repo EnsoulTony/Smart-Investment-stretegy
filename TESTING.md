@@ -34,6 +34,11 @@
 | 功能完成 | `make test-services && make test-frontend` | 本地驗證 |
 | Docker 驗證 | `make docker-up` → `curl http://localhost:8000/health` | 確認容器啟動 |
 
+### Sprint 驗收腳本（可回歸）
+
+- Sprint 2：`./tools/verify_sprint_2.sh`
+- Sprint 3：`./tools/verify_sprint_3.sh`（含 migrations、news signals contract、tier 分佈、triggers 必備、pytest）
+
 ## 4. CI 建議（未來擴充）
 
 1. GitHub Actions Workflow：

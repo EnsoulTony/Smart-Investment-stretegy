@@ -5,6 +5,7 @@ import logging
 from typing import Optional
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, Depends, HTTPException, Query, Body
+from pydantic import BaseModel
 from sqlalchemy.orm import Session
 from sqlalchemy import inspect
 from .schemas import RebuildPositionsRequest, RebuildPositionsResponse, PositionsResponse, TradesSummaryResponse
@@ -18,6 +19,7 @@ from app.trades_repository import count_trades_for_user, count_distinct_symbols_
 from app.models import Trade
 from app.schemas import TradeRecord
 from app.avg_cost_calculator import compute_avg_cost
+from app.core_holdings_service import CoreHoldingsService
 from collections import defaultdict
 from decimal import Decimal
 from datetime import date
@@ -69,6 +71,10 @@ app = FastAPI(title="Portfolio Service", version="0.1.0", lifespan=lifespan)
 async def health() -> dict[str, str]:
     """健康檢查端點，確認投資組合服務是否存活。"""
     return {"status": "ok", "service": SERVICE_NAME}
+
+
+def get_core_holdings_service(db: Session = Depends(get_db)) -> CoreHoldingsService:
+    return CoreHoldingsService(db)
 
 
 @app.post("/portfolio/sync", tags=["portfolio"])
@@ -514,3 +520,49 @@ def get_positions(
         items=items,
         next_cursor=next_cursor
     )
+
+
+@app.post("/portfolio/core_holdings/rebuild", tags=["portfolio"])
+def rebuild_core_holdings(
+    user_id: str = Query(..., min_length=1, description="使用者 ID"),
+    service: CoreHoldingsService = Depends(get_core_holdings_service),
+):
+    """從 trades 表的 is_core 標記重建 core_holdings。"""
+    rows_marked, rows_upserted = service.rebuild_core_holdings(user_id)
+    return {
+        "status": "ok",
+        "user_id": user_id,
+        "rows_marked": rows_marked,
+        "rows_upserted": rows_upserted,
+    }
+
+
+@app.get("/portfolio/core_holdings", tags=["portfolio"])
+def list_core_holdings(
+    user_id: str = Query(..., min_length=1, description="使用者 ID"),
+    service: CoreHoldingsService = Depends(get_core_holdings_service),
+):
+    symbols = service.list_core_symbols(user_id)
+    return {
+        "user_id": user_id,
+        "symbols": symbols,
+        "count": len(symbols),
+    }
+
+
+class CoreHoldingsSaveRequest(BaseModel):
+    symbols: list[str] = []
+
+
+@app.post("/portfolio/core_holdings", tags=["portfolio"])
+def save_core_holdings(
+    payload: CoreHoldingsSaveRequest,
+    user_id: str = Query(..., min_length=1, description="使用者 ID"),
+    service: CoreHoldingsService = Depends(get_core_holdings_service),
+):
+    saved = service.save_core_holdings(user_id, payload.symbols)
+    return {
+        "status": "ok",
+        "user_id": user_id,
+        "count": saved,
+    }

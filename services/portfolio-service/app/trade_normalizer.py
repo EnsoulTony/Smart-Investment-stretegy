@@ -85,6 +85,7 @@ class TradeNormalizer:
             "fee": os.getenv("SHEET_COL_FEE", "fee"),
             "trade_date": os.getenv("SHEET_COL_TRADE_DATE", "trade_date"),
             "broker": os.getenv("SHEET_COL_BROKER", "broker"),
+            "is_core": os.getenv("SHEET_COL_IS_CORE", "is_core"),
         }
         
         # 台股 ETF 白名單（用於判斷要補到幾碼）
@@ -215,6 +216,9 @@ class TradeNormalizer:
                 elif standard_col in row_dict:
                     # Fallback: 直接使用 canonical key（例如測試提供的 mock dict）
                     mapped_data[standard_col] = row_dict[standard_col]
+                elif standard_col == "is_core":
+                    # 可選欄位，預設 False
+                    mapped_data[standard_col] = False
                 else:
                     return None, f"缺少必要欄位：{sheet_col}（或 {standard_col}）"
             
@@ -295,7 +299,10 @@ class TradeNormalizer:
             else:
                 # 收集關鍵欄位原始資料（處理 None/NaN）
                 raw_data_snippet = {}
-                key_fields = ["user_id", "symbol", "asset_ccy", "side", "quantity", "price", "fee", "trade_date", "broker"]
+                key_fields = [
+                    "user_id", "symbol", "asset_ccy", "side", "quantity",
+                    "price", "fee", "trade_date", "broker", "is_core",
+                ]
                 for field in key_fields:
                     sheet_col = self.column_mapping.get(field)
                     value = row_dict.get(sheet_col) or row_dict.get(field)

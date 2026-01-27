@@ -23,6 +23,7 @@ class TradeRecord(BaseModel):
     fee: Decimal = Field(default=Decimal("0"), ge=0, description="手續費，必須 >= 0")
     trade_date: datetime = Field(..., description="交易日期時間")
     broker: str = Field(..., min_length=1, description="券商名稱（例如：IB、Firstrade）")
+    is_core: bool = Field(default=False, description="是否核心持股（從表單勾選）")
     
     @field_validator("side")
     @classmethod
@@ -118,6 +119,29 @@ class TradeRecord(BaseModel):
             raise ValueError(f"無法解析日期格式：{v}，支援格式：YYYY-MM-DD 或 YYYY-MM-DD HH:MM:SS")
         
         raise ValueError(f"trade_date 必須是字串或 datetime，收到：{type(v)}")
+
+    @field_validator("is_core", mode="before")
+    @classmethod
+    def validate_is_core(cls, v):
+        """解析 checkbox / 字串布林。"""
+        if isinstance(v, bool):
+            return v
+        if v is None:
+            return False
+        if isinstance(v, (int, float)):
+            return bool(v)
+        val = str(v).strip().lower()
+        return val in {"1", "true", "yes", "y", "t", "checked", "on", "☑", "v"}
+
+
+class CoreHolding(BaseModel):
+    """核心持股設定。"""
+
+    model_config = ConfigDict(extra="ignore")
+
+    user_id: str = Field(..., min_length=1)
+    symbol: str = Field(..., min_length=1)
+    is_core: bool = Field(default=True)
     
     # Pydantic V2 配置（使用 model_config 取代 class Config）
     model_config = ConfigDict(

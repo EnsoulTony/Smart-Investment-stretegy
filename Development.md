@@ -1234,6 +1234,30 @@ docker compose run --rm -e DATABASE_URL=x valuation-service python -c "from app.
 
 ---
 
+## Sprint 3: News N1/N3 與核心持股設定（可驗收 / 可回歸）
+
+### 設計原則
+
+- Google Sheet 只作為「交易來源」：同步後以本地 Postgres 為唯一真相來源（truth source）。
+- 核心持股不寫死、不在來源表勾選：由使用者在前端介面勾選 → 透過 portfolio-service API 寫入 `core_holdings`。
+- news-service 不重複持股邏輯：透過 HTTP 向 portfolio-service 取 `core_holdings` 來做規則 C（命中核心持股 +2）。
+
+### 核心端點
+
+- portfolio-service
+  - `GET /portfolio/core_holdings?user_id=tony`：取得核心持股清單（DB）
+  - `POST /portfolio/core_holdings?user_id=tony`：全量覆寫核心持股清單（DB）
+- news-service
+  - `GET /news/signals?user_id=tony&as_of=YYYY-MM-DD`：回傳 N1/N3 news signals（固定規則、deterministic stub）
+
+### 一鍵驗收
+
+```bash
+./dc.sh up -d --build
+./tools/verify_sprint_3.sh
+curl -s "http://localhost:8003/news/signals?user_id=tony&as_of=2026-01-27" | jq '.items | group_by(.tier) | map({tier:.[0].tier,count:length})'
+```
+
 ## 注意事項
 
 - 所有程式碼與文件須維持繁體中文描述。

@@ -27,6 +27,7 @@ Smart-Investment-Strategy 採微服務架構，分為前端、API Gateway、四�
 **Sprint 邊界標註**
 - Sprint 1：portfolio-service + valuation-service guardrails（估值層 HTTP-only）
 - Sprint 2：radar-service Strategy Engine + indicator-service（指標讀取）
+- Sprint 3：news-service N1/N3 signals（可回歸）+ portfolio-service core_holdings（本地 DB 設定）
 
 **服務埠號對照**
 
@@ -53,6 +54,7 @@ Smart-Investment-Strategy 採微服務架構，分為前端、API Gateway、四�
 - **portfolio-service**：
   - 管理 `trades`、`positions`、均價法計算。
   - 與 Google Sheets 同步資料。
+  - 管理使用者設定（例如：`core_holdings` 核心持股清單），做為其他服務的唯一真相來源（DB 持久化）。
 - **radar-service**：
   - 執行 Strategy Engine（可插拔架構）。
   - 內含 v1.4 Plugin（EDS 最小可行）。
@@ -68,7 +70,9 @@ Smart-Investment-Strategy 採微服務架構，分為前端、API Gateway、四�
   - 只能透過 HTTP 呼叫 `portfolio-service` 取數。
   - 不得新增 `DATABASE_URL`、不得出現 `postgresql://` 字串。
 - **news-service**：
-  - 抓取 GDELT、RSS（N1/N3），產出 `news_signals`。
+  - 產出新聞訊號 `GET /news/signals`（N1/N3 以固定打分規則決定 tier，可回歸）。
+  - 透過 HTTP 向 `portfolio-service` 取得 `core_holdings`（核心持股清單），避免寫死 holdings 與重複邏輯。
+  - Sprint 3 先提供 deterministic stub provider，避免外部資料源造成測試漂移（後續可替換真 provider）。
 - **research-service**：
   - 抓取國泰 PDF、允許手動匯入券商報告，產出 `research_signals`。
 - **Postgres**：
@@ -77,9 +81,10 @@ Smart-Investment-Strategy 採微服務架構，分為前端、API Gateway、四�
 ## 資料流程
 
 1. `portfolio-service` 啟動時同步 Google Sheets → 寫入 `trades`、`positions`。
-2. `radar-service` 讀取 `indicator_values`（含 `RS_XLU_XLK`）+ 持倉資料 → 產出建議。
-3. `news-service` / `research-service` 週期性擷取資料，寫入 `news_signals` / `research_signals`。
-4. `api-gateway` 聚合上述資料 → 提供前端 UI。
+2. 使用者透過前端介面勾選核心持股 → `portfolio-service` 寫入 `core_holdings`（本地 DB）。
+3. `radar-service` 讀取 `indicator_values`（含 `RS_XLU_XLK`）+ 持倉資料 → 產出建議。
+4. `news-service` 以請求時點（as_of）產出 news signals，並引用 `core_holdings` 輔助打分/映射（不直接讀 DB）。
+5. `api-gateway` 聚合上述資料 → 提供前端 UI。
 
 ## 部署拓樸
 

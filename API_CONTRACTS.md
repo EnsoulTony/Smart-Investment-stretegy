@@ -192,6 +192,46 @@ GET /portfolio/trades/summary?user_id=user-uuid
 { "detail": { "status": "missing_data", "missing_fields": ["trades"] } }
 ```
 
+#### `GET /portfolio/core_holdings`
+取得使用者目前勾選的核心持股清單（由本地 DB 管理；不依賴 Google Sheet 欄位）。
+
+**Request**
+```
+GET /portfolio/core_holdings?user_id=user-uuid
+```
+
+**Response 200 OK**
+```json
+{
+  "user_id": "user-uuid",
+  "symbols": ["TSLA", "OXY"],
+  "count": 2
+}
+```
+
+#### `POST /portfolio/core_holdings`
+設定使用者核心持股清單（全量覆寫）。供前端「勾選核心持股」使用。
+
+**Request**
+```
+POST /portfolio/core_holdings?user_id=user-uuid
+```
+
+```json
+{
+  "symbols": ["TSLA", "OXY", "TSM"]
+}
+```
+
+**Response 200 OK**
+```json
+{
+  "status": "ok",
+  "user_id": "user-uuid",
+  "count": 3
+}
+```
+
 ### 資料庫 Schema
 
 #### `trades` 表（寫入 Postgres）
@@ -207,9 +247,19 @@ GET /portfolio/trades/summary?user_id=user-uuid
 | fee | NUMERIC | 手續費 |
 | trade_date | TIMESTAMP | 交易日期時間 |
 | broker | TEXT | 券商 |
+| is_core | BOOLEAN | 是否核心持股（預設 false；由 UI/設定端點管理） |
 | source_row_id | TEXT | 原始列識別（可空） |
 | source_hash | TEXT | 去重 hash |
 | created_at | TIMESTAMP | 建立時間 |
+
+#### `core_holdings`
+| 欄位 | 型別 | 說明 |
+| --- | --- | --- |
+| id | INTEGER | 主鍵 |
+| user_id | TEXT | 使用者 ID |
+| symbol | TEXT | 股票代號 |
+| is_core | BOOLEAN | 是否核心（預設 true；該表只存設定結果） |
+| updated_at | TIMESTAMP | 更新時間 |
 
 #### `positions`
 | 欄位 | 型別 | 說明 |
@@ -469,19 +519,47 @@ GET /indicators/sector-rotation?symbols=XLU,XLK&as_of=2025-01-20
 
 ## 4. news-service
 
-### `news_signals`
+### `GET /news/signals`
+以固定規則產出可驗收的新聞訊號（N1/N3），禁止主觀推論。
+
+**Request**
+```
+GET /news/signals?user_id=user-uuid&as_of=YYYY-MM-DD
+```
+
+**Response 200 OK**
 ```json
 {
-  "id": "uuid",
-  "source": "gdelt",
-  "headline": "美債殖利率回落",
-  "summary": "...",
-  "importance": "N1" | "N3",
-  "published_at": "2024-01-22T08:00:00Z",
-  "tags": ["macro", "inflation"],
-  "risk_score": 0.65
+  "schema_version": "3.0",
+  "as_of": "2026-01-27",
+  "source": "stub",
+  "items": [
+    {
+      "id": "stub-001",
+      "tier": "N1",
+      "title": "Fed 利率決議前夕，10年期殖利率飆升至4.7%，TSLA 大跌",
+      "published_at": "2026-01-27T09:00:00Z",
+      "summary_zh": "市場開始 reprice，交易員認為通膨壓力升溫。",
+      "symbols": ["TSLA"],
+      "factor_groups": ["growth_tech"],
+      "themes": ["rates_central_bank"],
+      "falsifiable_triggers": [
+        { "type": "market", "name": "US10Y", "condition": "break_above_4.5", "value": 4.5 }
+      ],
+      "confidence": 0.85
+    }
+  ]
 }
 ```
+
+**items[] 必要欄位**
+- `id`, `tier`(N1|N3), `title`, `published_at`, `summary_zh`
+- `symbols[]`, `factor_groups[]`, `themes[]`
+- `falsifiable_triggers[]`（>=1）
+- `confidence`
+
+**falsifiable_triggers[] 必要欄位**
+- `type`, `name`, `condition`, `value`
 
 ## 5. research-service
 
@@ -515,10 +593,9 @@ GET /indicators/sector-rotation?symbols=XLU,XLK&as_of=2025-01-20
 
 ---
 
-**Sprint 2 更新日期：2026-01-26**
+**Sprint 3 更新日期：2026-01-27**
 
 **變更摘要：**
-- 新增 `GET /radar/decision` endpoint 規格
-- 新增 `GET /indicators/sector-rotation` endpoint 規格
-- 定義 422/502/503 錯誤回應格式
-- 說明 OutputSchema 必要欄位（inputs_hash, falsifiable_triggers, cooldown）
+- 新增 `GET /news/signals`（N1/N3 可驗收規則、items contract、triggers schema）
+- 新增 `GET/POST /portfolio/core_holdings`（核心持股清單由本地 DB 管理）
+- portfolio trades schema 新增 `is_core` 欄位
