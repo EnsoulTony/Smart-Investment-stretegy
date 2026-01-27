@@ -11,7 +11,7 @@
 #   ./tools/verify_sprint_2.sh
 # =============================================================================
 
-set -e
+set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
@@ -183,7 +183,7 @@ fi
 
 # Check cooldown_days = 5 for all actions
 if [ "$ACTIONS_COUNT" -gt 0 ]; then
-    COOLDOWNS=$(echo "$RADAR_BODY" | jq "[.actions[].constraints.cooldown_days] | unique")
+    COOLDOWNS=$(echo "$RADAR_BODY" | jq -c "[.actions[].constraints.cooldown_days] | unique")
     if [ "$COOLDOWNS" != "[5]" ] && [ "$COOLDOWNS" != "[]" ]; then
         echo -e "  ${RED}✗${NC} Not all actions have cooldown_days=5: $COOLDOWNS"
         exit 1
@@ -192,6 +192,87 @@ if [ "$ACTIONS_COUNT" -gt 0 ]; then
 fi
 
 echo -e "  ${GREEN}✓${NC} radar-service decision endpoint OK"
+echo ""
+
+# Step 4.5: Sprint 2 hard acceptance checks (falsifiable + reproducible)
+echo -e "${YELLOW}[4.5/6] Sprint 2 hard acceptance checks...${NC}"
+
+# Ensure jq exists
+if ! command -v jq >/dev/null 2>&1; then
+    echo -e "  ${RED}✗${NC} Missing dependency: jq"
+    echo "  Please install jq and rerun."
+    exit 1
+fi
+
+RADAR_URL="http://localhost:8002/radar/decision?user_id=tony&base_ccy=TWD"
+
+# Call twice for reproducibility check
+RADAR_BODY_1=$(curl -sS "$RADAR_URL")
+RADAR_BODY_2=$(curl -sS "$RADAR_URL")
+
+# Validate JSON
+echo "$RADAR_BODY_1" | jq -e . >/dev/null 2>&1 || {
+    echo -e "  ${RED}✗${NC} First radar response is not valid JSON"
+    echo "$RADAR_BODY_1"
+    exit 1
+}
+echo "$RADAR_BODY_2" | jq -e . >/dev/null 2>&1 || {
+    echo -e "  ${RED}✗${NC} Second radar response is not valid JSON"
+    echo "$RADAR_BODY_2"
+    exit 1
+}
+
+# inputs_hash must exist and be identical
+INPUTS_HASH_1=$(echo "$RADAR_BODY_1" | jq -e -r '.evidence.inputs_hash')
+INPUTS_HASH_2=$(echo "$RADAR_BODY_2" | jq -e -r '.evidence.inputs_hash')
+if [ -z "$INPUTS_HASH_1" ] || [ "$INPUTS_HASH_1" == "null" ]; then
+    echo -e "  ${RED}✗${NC} Missing evidence.inputs_hash in first response"
+    echo "$RADAR_BODY_1" | jq -e '.evidence' || true
+    exit 1
+fi
+if [ "$INPUTS_HASH_1" != "$INPUTS_HASH_2" ]; then
+    echo -e "  ${RED}✗${NC} evidence.inputs_hash mismatch between two calls"
+    echo "  first:  $INPUTS_HASH_1"
+    echo "  second: $INPUTS_HASH_2"
+    echo "$RADAR_BODY_1" | jq -e '.evidence' || true
+    echo "$RADAR_BODY_2" | jq -e '.evidence' || true
+    exit 1
+fi
+
+# actions_count >= 1
+ACTIONS_COUNT=$(echo "$RADAR_BODY_1" | jq -e '.actions | length')
+if [ "$ACTIONS_COUNT" -lt 1 ]; then
+    echo -e "  ${RED}✗${NC} actions_count < 1"
+    echo "$RADAR_BODY_1" | jq -e '.actions' || true
+    exit 1
+fi
+
+# triggers_total >= 2
+TRIGGERS_TOTAL=$(echo "$RADAR_BODY_1" | jq -e '[.actions[].falsifiable_triggers | length] | add')
+if [ "$TRIGGERS_TOTAL" -lt 2 ]; then
+    echo -e "  ${RED}✗${NC} triggers_total < 2 (got $TRIGGERS_TOTAL)"
+    echo "$RADAR_BODY_1" | jq -e '.actions' || true
+    exit 1
+fi
+
+# cooldown_days must all be 5
+COOLDOWNS=$(echo "$RADAR_BODY_1" | jq -e -c '[.actions[].constraints.cooldown_days] | unique')
+if [ "$COOLDOWNS" != "[5]" ]; then
+    echo -e "  ${RED}✗${NC} cooldown_days not all 5: $COOLDOWNS"
+    echo "$RADAR_BODY_1" | jq -e '.actions' || true
+    exit 1
+fi
+
+# Required trigger names: XLK/XLU and ratio.slope5
+HAS_XLK_XLU=$(echo "$RADAR_BODY_1" | jq -e '[.actions[].falsifiable_triggers[].name] | any(. == "XLK/XLU")')
+HAS_SLOPE5=$(echo "$RADAR_BODY_1" | jq -e '[.actions[].falsifiable_triggers[].name] | any(. == "ratio.slope5")')
+if [ "$HAS_XLK_XLU" != "true" ] || [ "$HAS_SLOPE5" != "true" ]; then
+    echo -e "  ${RED}✗${NC} Missing required falsifiable triggers (XLK/XLU or ratio.slope5)"
+    echo "$RADAR_BODY_1" | jq -e '.actions' || true
+    exit 1
+fi
+
+echo -e "  ${GREEN}✓${NC} Sprint 2 hard acceptance checks passed"
 echo ""
 
 # Step 5: Run pytest in indicator-service container
