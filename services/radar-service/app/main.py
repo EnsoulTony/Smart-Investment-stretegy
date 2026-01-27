@@ -35,7 +35,7 @@ app = FastAPI(
 
 
 @app.get("/health", tags=["health"])
-async def health() -> dict[str, str]:
+async def health() -> dict[str, str | list[str]]:
     """Health check endpoint."""
     engine = get_default_engine()
     return {
