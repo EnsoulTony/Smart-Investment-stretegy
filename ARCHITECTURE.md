@@ -24,6 +24,10 @@ Smart-Investment-Strategy 採微服務架構，分為前端、API Gateway、四�
 註：只有 portfolio / radar / news / research 連接 Postgres；valuation-service 禁止 DB 連線。
 ```
 
+**Sprint 邊界標註**
+- Sprint 1：portfolio-service + valuation-service guardrails（估值層 HTTP-only）
+- Sprint 2：radar-service Strategy Engine + indicator-service（指標讀取）
+
 **服務埠號對照**
 
 | 服務 | 埠號 | 備註 |
@@ -133,6 +137,11 @@ radar-service/app/strategy_engine/
 | **indicator-service** | 提供唯讀指標 API，不寫入任何 DB |
 | **radar-service** | 透過 HTTP 組合 portfolio + indicators，不直接存取 indicator DB |
 | **Strategy Engine** | 只用 positions + indicators + signals，不引入估值/FX/市價 |
+
+**禁止事項（硬性）**
+- valuation-service：禁止任何 DB driver / connection string（`DATABASE_URL`、`postgresql://`）
+- portfolio-service：禁止匯率折算與估值欄位（`market_value` / `valuation_ccy`）
+- indicator-service：不得寫入 trades/positions 表
 
 ---
 

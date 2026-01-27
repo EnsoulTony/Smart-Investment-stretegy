@@ -177,6 +177,21 @@ GET /portfolio/trades/summary?user_id=user-uuid
 }
 ```
 
+**Error 422 Unprocessable Entity**
+```json
+{ "detail": { "status": "invalid_request", "message": "missing user_id" } }
+```
+
+**Error 502 Bad Gateway**（上游依賴不可用）
+```json
+{ "detail": { "status": "upstream_error", "service": "postgres", "message": "..." } }
+```
+
+**Error 503 Service Unavailable**（必要資料缺失）
+```json
+{ "detail": { "status": "missing_data", "missing_fields": ["trades"] } }
+```
+
 ### 資料庫 Schema
 
 #### `trades` 表（寫入 Postgres）
@@ -209,7 +224,70 @@ GET /portfolio/trades/summary?user_id=user-uuid
 | u_pnl | NUMERIC | 未實現損益（帳務層固定為 0） |
 | last_updated_at | TIMESTAMP | 最後更新時間 |
 
-## 3. radar-service
+## 3. valuation-service（Sprint 1-4.B）
+
+### `GET /valuation/portfolio`
+
+估值層 API（HTTP-only），僅透過 portfolio-service 取數。
+
+**Request**
+```
+GET /valuation/portfolio?user_id=tony&base_ccy=USD
+```
+
+**Response 200 OK**
+```json
+{
+  "status": "succeeded",
+  "user_id": "tony",
+  "base_ccy": "USD",
+  "as_of": "2026-01-27",
+  "totals": { "market_value": 120000, "cost_value": 110000, "unrealized_pnl": 10000 },
+  "positions": [
+    {
+      "symbol": "AAPL",
+      "asset_ccy": "USD",
+      "quantity": 10,
+      "avg_cost": 150,
+      "cost_value": 1500,
+      "price": 190,
+      "price_ccy": "USD",
+      "market_value": 1900,
+      "unrealized_pnl": 400
+    }
+  ],
+  "evidence": {
+    "decision": "proceed",
+    "precondition_snapshot": { "trades_count": 5, "distinct_symbols_count": 3 },
+    "verification": { "portfolio_service_endpoints_called": ["GET /portfolio/trades/summary?user_id=tony"] },
+    "providers": { "price_provider": "stub", "fx_provider": "stub" },
+    "positions_count": 3,
+    "positions_hash": "..."
+  }
+}
+```
+
+**Error 409 Conflict**（前置條件不足）
+```json
+{ "detail": { "status": "precondition_failed", "message": "trades_count=0;請先執行 sync" } }
+```
+
+**Error 422 Unprocessable Entity**
+```json
+{ "detail": { "status": "invalid_request", "message": "missing user_id" } }
+```
+
+**Error 502 Bad Gateway**（上游連線失敗）
+```json
+{ "detail": { "status": "upstream_error", "service": "portfolio-service", "message": "..." } }
+```
+
+**Error 503 Service Unavailable**（必要資料缺失）
+```json
+{ "detail": { "status": "missing_data", "missing_fields": ["positions"] } }
+```
+
+## 4. radar-service
 
 ### `GET /radar/decision`（Sprint 2 新增）
 
@@ -319,7 +397,7 @@ GET /radar/decision?user_id=tony&base_ccy=TWD&plugin=v1.4
 
 ---
 
-## 3.5. indicator-service（Sprint 2 新增）
+## 5. indicator-service（Sprint 2 新增）
 
 ### `GET /indicators/sector-rotation`
 
@@ -352,6 +430,21 @@ GET /indicators/sector-rotation?symbols=XLU,XLK&as_of=2025-01-20
     "value_5d_ago": 3.045
   }
 }
+```
+
+**Error 422 Unprocessable Entity**
+```json
+{ "detail": { "status": "invalid_request", "message": "invalid as_of format" } }
+```
+
+**Error 502 Bad Gateway**（上游不可用）
+```json
+{ "detail": { "status": "upstream_error", "service": "data-provider", "message": "..." } }
+```
+
+**Error 503 Service Unavailable**（資料不完整）
+```json
+{ "detail": { "status": "provider_error", "message": "indicator data missing fields" } }
 ```
 
 **必要欄位**

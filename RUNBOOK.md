@@ -154,6 +154,23 @@ curl "http://localhost:8002/radar/decision?user_id=tony&base_ccy=TWD"
 | pytest (indicator) | 全部 PASSED |
 | pytest (radar) | 全部 PASSED |
 
+### 1.4. 驗收順序（Sprint 1 → Sprint 2）
+
+```bash
+# Sprint 1
+./tools/verify_sprint_1-4-b.sh
+./tools/verify_sprint_1-4-a.sh
+./tools/test_preview.sh
+
+# Sprint 2
+./tools/verify_sprint_2.sh
+```
+
+**故障排查（常見）**
+- `inputs_hash` 不一致：確認兩次 /radar/decision 的輸入完全相同（as_of/positions/indicators）
+- `actions` 為空：檢查 radar-service 是否有回傳虛擬 action（symbol=PORTFOLIO）
+- indicator 422：檢查 `as_of` 格式與 `symbols=XLU,XLK` 參數
+
 ## 2. 異常排查對照表
 
 | 症狀 | 可能原因 | 處理步驟 |

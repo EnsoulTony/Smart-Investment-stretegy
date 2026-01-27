@@ -183,6 +183,22 @@ MVP 採用 VM 部署並支援 GitHub push 自動更新：
 
 > 📁 Sprint 規格文件統一放在 `docs/sprints/` 目錄。
 
+### 如何驗收（最短路徑）
+
+**Sprint 1**
+```bash
+./tools/verify_sprint_1-4-b.sh
+./tools/verify_sprint_1-4-a.sh
+./tools/test_preview.sh
+```
+
+**Sprint 2**
+```bash
+./tools/verify_sprint_2.sh
+./dc.sh exec -T radar-service pytest -q
+./dc.sh exec -T indicator-service pytest -q
+```
+
 ### Sprint 2 新增功能
 
 - **Strategy Engine**：可插拔架構，固定 Input/Output Schema（詳見 [docs/sprints/sprint-2.md](docs/sprints/sprint-2.md)）

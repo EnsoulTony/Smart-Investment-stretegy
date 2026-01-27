@@ -1,5 +1,7 @@
 # Sprint 2：Strategy Engine（可插拔）+ v1.4 Plugin（EDS）+ indicator-service
 
+> Sprint 1 對照：`docs/sprints/sprint-1.md`
+
 ## 目標（Goals）
 
 Sprint 2 聚焦於建立可插拔的策略引擎與市場指標服務：
