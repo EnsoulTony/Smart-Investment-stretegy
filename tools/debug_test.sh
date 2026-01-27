@@ -2,6 +2,9 @@
 # 運行單個測試並顯示詳細輸出
 set -euo pipefail
 
+repo_root="$(cd "$(dirname "$0")/.." && pwd)"
+cd "$repo_root"
+
 echo "運行測試並顯示調試輸出..."
 docker compose exec -T portfolio-service pytest tests/test_sync_endpoint.py::TestSyncEndpoint::test_first_sync_inserts_all_records -v -s
 

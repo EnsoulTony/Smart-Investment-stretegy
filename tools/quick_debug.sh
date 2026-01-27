@@ -2,6 +2,9 @@
 # 快速測試 TradeNormalizer
 set -euo pipefail
 
+repo_root="$(cd "$(dirname "$0")/.." && pwd)"
+cd "$repo_root"
+
 docker compose exec -T portfolio-service python3 << 'EOF'
 from app.trade_normalizer import TradeNormalizer
 import json

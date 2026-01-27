@@ -126,7 +126,7 @@ grep -r "from app.fx import" services/portfolio-service/app/ --exclude-dir=fx
 ### 執行完整驗收腳本
 ```bash
 cd /root/Smart-Investment-stretegy
-./verify_sprint_1-4-a.sh
+./tools/verify_sprint_1-4-a.sh
 ```
 
 **預期結果**:
@@ -192,7 +192,7 @@ Is stub: True
 | STRATEGY_MD_PATCH.md | ✅ 完成 | 帳務層 vs 估值層分界 |
 | SPRINT_1-4-A_README.md | ✅ 完成 | Sprint 目標與實作說明 |
 | SPRINT_1-4-A_HARDENING_COMPLETE.md | ✅ 完成 | 完整加固報告 |
-| verify_sprint_1-4-a.sh | ✅ 完成 | 自動化驗收腳本 |
+| tools/verify_sprint_1-4-a.sh | ✅ 完成 | 自動化驗收腳本 |
 
 **分界說明清晰度**: ✅ 讀完不會誤會「現在就有估值」
 
@@ -213,7 +213,7 @@ Is stub: True
 1. `DEVELOPMENT_MD_PATCH.md`
 2. `STRATEGY_MD_PATCH.md`
 3. `SPRINT_1-4-A_HARDENING_COMPLETE.md`
-4. `verify_sprint_1-4-a.sh`
+4. `tools/verify_sprint_1-4-a.sh`
 
 ### ✅ 未修改現有模組
 - ✅ 未重構 `position_rebuilder.py`

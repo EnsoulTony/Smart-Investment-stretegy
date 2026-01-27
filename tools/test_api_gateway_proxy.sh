@@ -3,13 +3,15 @@
 
 set -e
 
+repo_root="$(cd "$(dirname "$0")/.." && pwd)"
+
 echo "=================================================="
 echo "測試 API Gateway 反向代理"
 echo "=================================================="
 echo
 
 # 切換到 api-gateway 目錄
-cd "$(dirname "$0")/services/api-gateway"
+cd "$repo_root/services/api-gateway"
 
 echo "1. 安裝測試依賴..."
 pip install -q pytest pytest-asyncio httpx 2>/dev/null || true

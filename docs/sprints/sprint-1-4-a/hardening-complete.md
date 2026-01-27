@@ -136,7 +136,7 @@ class TestFxFactory:
 - ✅ `DEVELOPMENT_MD_PATCH.md`（Development.md 補丁）
 - ✅ `STRATEGY_MD_PATCH.md`（Strategy.md 補丁）
 - ✅ `SPRINT_1-4-A_README.md`（完整 Sprint 文件，已修正路徑）
-- ✅ `verify_sprint_1-4-a.sh`（**新增**，自動化驗收腳本）
+- ✅ `tools/verify_sprint_1-4-a.sh`（**新增**，自動化驗收腳本）
 
 ### 待手動應用
 - ⏳ `Development.md`（需根據 DEVELOPMENT_MD_PATCH.md 手動更新）
@@ -147,8 +147,8 @@ class TestFxFactory:
 ### 快速驗收（推薦）
 
 ```bash
-chmod +x verify_sprint_1-4-a.sh
-./verify_sprint_1-4-a.sh
+chmod +x tools/verify_sprint_1-4-a.sh
+./tools/verify_sprint_1-4-a.sh
 ```
 
 此腳本會自動執行以下步驟：
@@ -280,8 +280,8 @@ fx = get_fx_provider()
 ### 立即執行
 1. **執行驗收腳本**：
    ```bash
-   chmod +x verify_sprint_1-4-a.sh
-   ./verify_sprint_1-4-a.sh
+   chmod +x tools/verify_sprint_1-4-a.sh
+   ./tools/verify_sprint_1-4-a.sh
    ```
 
 2. **手動應用文檔補丁**：

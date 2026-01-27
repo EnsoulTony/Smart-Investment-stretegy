@@ -87,8 +87,8 @@
 ```bash
 # 使用專案提供的腳本
 cd /workspaces/Smart-Investment-stretegy
-chmod +x test_preview.sh
-./test_preview.sh
+chmod +x tools/test_preview.sh
+./tools/test_preview.sh
 ```
 
 ### 方法 2：手動步驟

@@ -197,6 +197,24 @@ MVP 採用 VM 部署並支援 GitHub push 自動更新：
 
 ---
 
+## 工具腳本一覽（tools/）
+
+- `./tools/verify_sprint_1-4-a.sh`：Sprint 1-4.A 完整驗收（FX + Guardrails + 全測試）
+- `./tools/verify_sprint_1-4-b.sh`：Sprint 1-4.B 驗收（估值 API）
+- `./tools/verify_sprint_2.sh`：Sprint 2 驗收（Strategy Engine + indicator-service）
+- `./tools/test_preview.sh`：Sprint 1-4.2 preview 驗證（含 rebuild 測試）
+- `./tools/test_sprint_1-3.sh`：Sprint 1-3 快速測試（sync endpoint）
+- `./tools/test_api_gateway_proxy.sh`：api-gateway 反向代理測試
+- `./tools/verify_portfolio_hardening.sh`：portfolio-service 加固驗收（hash/observability）
+- `./tools/pr_check.sh`：PR 自動檢查（forbidden tokens / compose env / pytest）
+- `./tools/portfolio_refresh.sh`：portfolio refresh 流程（同步 → rebuild）
+- `./tools/debug_test.sh`：單測試 debug（sync_endpoint 單例 + TradeNormalizer）
+- `./tools/quick_debug.sh`：快速檢查 TradeNormalizer
+- `./tools/diagnose_and_fix_tests.sh`：檢查測試版本與重建流程
+- `./tools/fix_pr_check.sh`：修補 `tools/pr_check.sh` 的 secrets guard 比較邏輯（僅在需要時執行）
+
+---
+
 ## 重要文件
 - [Strategy.md](Strategy.md)：Radar v1.4 規則、抽換邊界與指標定義
 - [Development.md](Development.md)：分階段 prompts、開發流程、一鍵命令模板

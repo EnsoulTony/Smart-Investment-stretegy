@@ -284,11 +284,11 @@ docker compose exec portfolio-service pytest tests/test_rebuild_positions_previe
 
 **一鍵驗證腳本**：
 
-專案提供了 `test_preview.sh` 腳本自動執行上述流程：
+專案提供了 `tools/test_preview.sh` 腳本自動執行上述流程：
 
 ```bash
-chmod +x test_preview.sh
-./test_preview.sh
+chmod +x tools/test_preview.sh
+./tools/test_preview.sh
 ```
 
 **注意事項**：
@@ -399,6 +399,18 @@ ModuleNotFoundError: No module named 'app'
 - `distinct_symbols_count > 0`
 - `positions_columns` 含 `u_pnl`
 - `verification_sql` 可直接複製執行且與 API 回傳一致
+
+### 工具腳本一覽（tools/）
+
+- `./tools/verify_sprint_1-4-a.sh`：Sprint 1-4.A 完整驗收（FX + Guardrails + 全測試）
+- `./tools/test_preview.sh`：Sprint 1-4.2 preview 驗證（含 rebuild 測試）
+- `./tools/test_sprint_1-3.sh`：Sprint 1-3 快速測試（sync endpoint）
+- `./tools/test_api_gateway_proxy.sh`：api-gateway 反向代理測試
+- `./tools/verify_portfolio_hardening.sh`：portfolio-service 加固驗收（hash/observability）
+- `./tools/debug_test.sh`：單測試 debug（sync_endpoint 單例 + TradeNormalizer）
+- `./tools/quick_debug.sh`：快速檢查 TradeNormalizer
+- `./tools/diagnose_and_fix_tests.sh`：檢查測試版本與重建流程
+- `./tools/fix_pr_check.sh`：修補 `tools/pr_check.sh` 的 secrets guard 比較邏輯（僅在需要時執行）
 
 ## 3. 重啟與回滾
 
@@ -530,7 +542,7 @@ docker compose exec -T portfolio-service pytest -q tests/test_fx.py
 bash services/portfolio-service/verify_sprint_1-3.sh
 
 # Sprint 1-4.A 驗收
-bash verify_sprint_1-4-a.sh
+bash tools/verify_sprint_1-4-a.sh
 ```
 
 ---

@@ -2,6 +2,9 @@
 # 診斷並修復測試問題
 set -euo pipefail
 
+repo_root="$(cd "$(dirname "$0")/.." && pwd)"
+cd "$repo_root"
+
 echo "=== Sprint 1-3 測試診斷 ==="
 echo ""
 

@@ -112,7 +112,7 @@
 - 違規時的錯誤訊息範例
 - 手動檢查違規的 grep 命令
 - 測試隔離方法（reset_fx_provider）
-- 完整驗收命令（verify_sprint_1-4-a.sh）
+- 完整驗收命令（tools/verify_sprint_1-4-a.sh）
 
 ---
 
@@ -239,7 +239,7 @@ git commit -m "docs: 完成 RUNBOOK.md 加固
 2. [RUNBOOK_UPDATE_PLAN.md](RUNBOOK_UPDATE_PLAN.md) - 精確更新指引
 3. [RUNBOOK_ACCEPTANCE_COMMANDS.md](RUNBOOK_ACCEPTANCE_COMMANDS.md) - 集中驗收命令
 4. [SPRINT_1-4-A_HARDENING_COMPLETE.md](SPRINT_1-4-A_HARDENING_COMPLETE.md) - Sprint 1-4.A 加固報告
-5. [verify_sprint_1-4-a.sh](verify_sprint_1-4-a.sh) - 自動化驗收腳本
+5. [tools/verify_sprint_1-4-a.sh](tools/verify_sprint_1-4-a.sh) - 自動化驗收腳本
 
 ---
 

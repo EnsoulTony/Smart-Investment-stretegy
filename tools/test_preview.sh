@@ -3,6 +3,9 @@
 
 set -e  # 任何命令失敗立即退出
 
+repo_root="$(cd "$(dirname "$0")/.." && pwd)"
+cd "$repo_root"
+
 echo "=== 重新建置 portfolio-service 容器 ==="
 echo "原因：Dockerfile COPY 了 tests/ 目錄，修改測試需要 rebuild"
 docker compose up -d --build portfolio-service

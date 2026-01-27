@@ -8,7 +8,8 @@ echo "Portfolio Service 加固驗收"
 echo "=================================================="
 echo
 
-cd "$(dirname "$0")/services/portfolio-service"
+repo_root="$(cd "$(dirname "$0")/.." && pwd)"
+cd "$repo_root/services/portfolio-service"
 
 echo "1. 檢查 Python 語法..."
 python -m py_compile app/trade_normalizer.py

@@ -656,7 +656,7 @@ def test_fx_behavior():
 ```bash
 # 完整驗收流程
 cd /root/Smart-Investment-stretegy
-./verify_sprint_1-4-a.sh
+./tools/verify_sprint_1-4-a.sh
 
 # 或手動執行各步驟
 docker compose up -d --build portfolio-service

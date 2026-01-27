@@ -57,7 +57,7 @@ pytest tests/ -q
 - `DEVELOPMENT_MD_PATCH.md`: FX 硬禁止規則
 - `STRATEGY_MD_PATCH.md`: 帳務層 vs 估值層分界
 - `SPRINT_1-4-A_ACCEPTANCE_REPORT.md`: 完整驗收報告
-- `verify_sprint_1-4-a.sh`: 自動化驗收腳本
+- `tools/verify_sprint_1-4-a.sh`: 自動化驗收腳本
 
 ## 🔍 Code Review 要點
 1. **Stub Provider 防呆**: 跨幣別必須拋錯（避免默默 1:1）
@@ -67,7 +67,7 @@ pytest tests/ -q
 
 ## ✅ 驗收命令
 ```bash
-./verify_sprint_1-4-a.sh
+./tools/verify_sprint_1-4-a.sh
 ```
 
 ## 🚀 下一步

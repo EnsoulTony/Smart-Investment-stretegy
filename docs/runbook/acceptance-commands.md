@@ -355,8 +355,8 @@ grep -r "from app.fx.interfaces" services/portfolio-service/app/ --exclude=__ini
 ```bash
 # 執行完整驗收腳本
 cd /root/Smart-Investment-stretegy
-chmod +x verify_sprint_1-4-a.sh
-./verify_sprint_1-4-a.sh
+chmod +x tools/verify_sprint_1-4-a.sh
+./tools/verify_sprint_1-4-a.sh
 
 # 預期：所有步驟 ✅ PASSED
 ```

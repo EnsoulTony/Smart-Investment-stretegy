@@ -1,9 +1,12 @@
 #!/bin/bash
 # Fix pr_check.sh secrets leak guard bug
 
-sed -i '113s/|| echo "0"/|| true/' /root/Smart-Investment-stretegy/tools/pr_check.sh
-sed -i '117s/|| echo "0"/|| true/' /root/Smart-Investment-stretegy/tools/pr_check.sh
-sed -i '120s/!= "0"/> 0/g' /root/Smart-Investment-stretegy/tools/pr_check.sh
+repo_root="$(cd "$(dirname "$0")/.." && pwd)"
+target="$repo_root/tools/pr_check.sh"
+
+sed -i '113s/|| echo "0"/|| true/' "$target"
+sed -i '117s/|| echo "0"/|| true/' "$target"
+sed -i '120s/!= "0"/> 0/g' "$target"
 
 echo "Fixed pr_check.sh:"
 echo "  - Line 113: Changed '|| echo \"0\"' to '|| true'"

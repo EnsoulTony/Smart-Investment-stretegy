@@ -11,8 +11,8 @@
 
 ```bash
 # 方法 1：使用專案提供的腳本
-chmod +x test_preview.sh
-./test_preview.sh
+chmod +x tools/test_preview.sh
+./tools/test_preview.sh
 ```
 
 ## 詳細驗收步驟
