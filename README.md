@@ -178,8 +178,10 @@ MVP 採用 VM 部署並支援 GitHub push 自動更新：
 
 | Sprint | 狀態 | 說明 | 驗收腳本 |
 | --- | --- | --- | --- |
-| Sprint 1 | ✅ 完成 | Portfolio 均價法、rebuild idempotency、preview/write hash 一致 | `tools/verify_sprint_1-4-b.sh` |
+| Sprint 1 | ✅ 完成 | Portfolio 均價法、rebuild idempotency、preview/write hash 一致、valuation-service（HTTP-only guardrails） | `tools/verify_sprint_1-4-b.sh` |
 | Sprint 2 | ✅ 完成 | Strategy Engine（可插拔）+ v1.4 plugin（EDS）+ indicator-service（XLU/XLK） | `tools/verify_sprint_2.sh` |
+
+> 📁 Sprint 規格文件統一放在 `docs/sprints/` 目錄。
 
 ### Sprint 2 新增功能
 

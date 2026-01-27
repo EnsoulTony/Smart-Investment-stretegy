@@ -267,20 +267,24 @@ GET /radar/decision?user_id=tony&base_ccy=TWD&plugin=v1.4
 | `actions[].falsifiable_triggers` | 至少 1 個推翻條件 |
 | `actions[].constraints.cooldown_days` | 固定 5 天 |
 
-**Error 422 Unprocessable Entity**
+**Error 422 Unprocessable Entity**（radar-service 自身驗證失敗）
 ```json
 { "detail": { "status": "invalid_request", "message": "Invalid date format" } }
 ```
 
-**Error 502 Bad Gateway**
+**Error 502 Bad Gateway**（radar-service 呼叫上游但連線失敗或上游回傳非 2xx）
 ```json
 { "detail": { "status": "upstream_error", "service": "portfolio-service", "message": "..." } }
 ```
 
-**Error 503 Service Unavailable**
+**Error 503 Service Unavailable**（radar-service 拿到上游回應但缺少必要欄位）
 ```json
 { "detail": { "status": "missing_data", "missing_fields": ["indicators.sector_rotation.ratio.slope5"] } }
 ```
+
+> **責任歸屬**：
+> - **indicator-service**：provider 不可用或資料不完整 → 回傳 503（`provider_error`）
+> - **radar-service**：上游連線失敗 → 502；上游回應但缺欄位 → 503（`missing_data`）
 
 ### Legacy 結構（保留相容）
 

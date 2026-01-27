@@ -7,6 +7,31 @@
 1. `docker ps --format 'table {{.Names}}\t{{.Status}}'`（所有容器須為 healthy）
 2. `curl http://localhost:8000/health`（Gateway 探活）
 3. `curl http://localhost:8001/health` ~ `8006/health`（抽樣，含 indicator-service 8006）
+
+### Health Check 標準（所有服務）
+
+每個 FastAPI 服務必須提供 `GET /health`，回傳：
+
+```json
+{ "status": "ok", "service": "<service-name>" }
+```
+
+| 服務 | 埠號 | 健康檢查 URL |
+| --- | --- | --- |
+| api-gateway | 8000 | `http://localhost:8000/health` |
+| portfolio-service | 8001 | `http://localhost:8001/health` |
+| radar-service | 8002 | `http://localhost:8002/health` |
+| news-service | 8003 | `http://localhost:8003/health` |
+| research-service | 8004 | `http://localhost:8004/health` |
+| valuation-service | 8005 | `http://localhost:8005/health` |
+| indicator-service | 8006 | `http://localhost:8006/health` |
+
+**驗證指令**：
+```bash
+for port in 8000 8001 8002 8003 8004 8005 8006; do
+  echo "Port $port: $(curl -s http://localhost:$port/health | jq -r '.status // "FAIL"')"
+done
+```
 4. `journalctl -u radar-deploy.timer -n 30`
 5. `docker compose exec postgres pg_isready`
 6. 檢查最新 `recommendations`、`news_signals` 是否更新（可透過 SQL 或 API）

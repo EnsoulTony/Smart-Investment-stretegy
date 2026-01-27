@@ -13,11 +13,15 @@ Smart-Investment-Strategy 採微服務架構，分為前端、API Gateway、四�
     |             |               |                 |              |
  [portfolio]  [radar]         [news]          [research]    [valuation]
     |             |               |                 |              |
-    |        [Strategy Engine]    |                 |        (HTTP-only)
+    |        [Strategy Engine]    |                 |        (HTTP→portfolio)
     |             |               |                 |              |
     |      [indicator-service]    |                 |              |
     |             |               |                 |              |
-                         [Postgres]                        (禁止 DB 連線)
+    +-------------+---------------+-----------------+              ✗
+                  |                                           (禁止 DB 連線)
+            [Postgres]
+
+註：只有 portfolio / radar / news / research 連接 Postgres；valuation-service 禁止 DB 連線。
 ```
 
 **服務埠號對照**

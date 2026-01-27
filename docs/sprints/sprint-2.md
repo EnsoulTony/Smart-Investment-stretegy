@@ -152,6 +152,35 @@ GET /radar/decision?user_id=tony&base_ccy=TWD&plugin=v1.4
 
 ---
 
+## Canonical JSON 與 inputs_hash 定義
+
+`evidence.inputs_hash` 是 InputSchema 的 canonical JSON 經 SHA256 雜湊後的結果（64 字元 hex）。
+
+**Canonical JSON 規則**：
+1. **Key 排序**：所有 object keys 按字母順序排列（遞迴套用）
+2. **無空白**：不含多餘空格或換行（compact format）
+3. **UTF-8 編碼**：確保一致性
+
+**Python 實作**：
+```python
+import json
+import hashlib
+
+def canonical_json_hash(obj: dict) -> str:
+    """產生 canonical JSON 的 SHA256 hash"""
+    canonical = json.dumps(obj, sort_keys=True, separators=(',', ':'), ensure_ascii=False)
+    return hashlib.sha256(canonical.encode('utf-8')).hexdigest()
+```
+
+**範例**：
+```python
+input_data = {"user_id": "tony", "positions": [{"symbol": "TSLA", "quantity": 10}]}
+# canonical JSON: {"positions":[{"quantity":10,"symbol":"TSLA"}],"user_id":"tony"}
+# inputs_hash: "3a7f8c..."（64 字元）
+```
+
+---
+
 ## v1.4 Plugin 規則（EDS）
 
 ### Mode 計分制
