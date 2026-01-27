@@ -254,8 +254,18 @@ class V1_4Plugin(StrategyPlugin):
 
             actions.append(action)
 
-        # For WATCHLIST with no positions, still return triggers in evidence
-        # Actions can be empty but the output will have triggers in evidence
+        # If no positions, still emit a virtual HOLD action to carry triggers.
+        if not actions:
+            actions.append(ActionItem(
+                symbol="PORTFOLIO",
+                action=Action.HOLD,
+                reason="no positions; emit falsifiable triggers",
+                constraints=ActionConstraints(
+                    cooldown_days=5,
+                    max_position_pct=0.0,
+                ),
+                falsifiable_triggers=base_triggers,
+            ))
 
         return actions
 

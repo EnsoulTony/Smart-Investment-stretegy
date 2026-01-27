@@ -142,6 +142,11 @@ GET /radar/decision?user_id=tony&base_ccy=TWD&plugin=v1.4
 }
 ```
 
+**備註（空持倉時的最小輸出）**
+- 即使 `decision=NO_ACTION` 或 positions 為空，仍會輸出至少 1 個 action
+- 使用虛擬標的承載 falsifiable triggers：`symbol="PORTFOLIO"`, `action="HOLD"`
+- `constraints.cooldown_days` 固定為 `5`，`max_position_pct` 為 `0`
+
 **Error Codes**
 
 | 狀態碼 | 說明 | Payload |

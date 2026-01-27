@@ -150,6 +150,7 @@ curl "http://localhost:8002/radar/decision?user_id=tony&base_ccy=TWD"
 | radar decision | OutputSchema 完整, evidence.inputs_hash 長度 64 |
 | falsifiable_triggers | actions 中每個 action 至少 1 個 trigger |
 | cooldown_days | 所有 actions 固定為 5 |
+| 空持倉行為 | actions 至少 1 筆（symbol=PORTFOLIO, action=HOLD） |
 | pytest (indicator) | 全部 PASSED |
 | pytest (radar) | 全部 PASSED |
 
