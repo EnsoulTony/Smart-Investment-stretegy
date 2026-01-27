@@ -123,12 +123,20 @@
 
 ---
 
-### 未來階段：Sprint 1-4.B（估值層）
+### Sprint 1-4.B（估值層）現況
 
-**估值層（Valuation Layer）** - 未實作：
+**已完成（估值層骨架 / API-only 取數邊界）**：
+- ✅ valuation-service `/valuation/portfolio` API（HTTP-only 取數）
+- ✅ 前置條件檢查（trades_count=0 → 409）
+- ✅ Guardrails（禁止 DB 直連 / 環境變數阻斷）
+- ✅ Stub Price/Fx Providers（deterministic）
+- ✅ Evidence（含 providers / positions_hash / masked_env_keys）
+- ✅ 驗收腳本：`tools/verify_sprint_1-4-b.sh`
+
+**未完成（完整估值層）**：
 - ⏸ 真實匯率資料源（Yahoo Finance / 央行牌告 / Alpha Vantage）
 - ⏸ 匯率 cache 機制（Redis / DB rates 表）
-- ⏸ 市價估值計算（`quantity * market_price * fx_rate`）
+- ⏸ 真實市價 Provider（非 stub）
 - ⏸ 透過 Alembic migration 新增 `valuation_ccy` / `market_value` 欄位
 
 **架構保證**：

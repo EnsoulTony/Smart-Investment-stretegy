@@ -168,9 +168,9 @@ Smart-Investment-stretegy/
 | Sprint 1 | portfolio-service | 持倉重算 (`POST /portfolio/rebuild_positions`) | - |
 | Sprint 1-4.A | portfolio-service | FX 模組介面 + Stub (`app/fx/`) | 20 個測試通過 |
 | Sprint 1-4.3 | portfolio-service | positions 表寫回 | - |
-| Sprint 1-4.B | valuation-service | 估值層骨架 (`GET /valuation/portfolio`) | - |
-| Sprint 1-4.B | valuation-service | Runtime Guard (`guardrails.py`) | - |
-| Sprint 1-4.B | valuation-service | Price/FX Stub Providers | - |
+| Sprint 1-4.B | valuation-service | 估值層骨架 (`GET /valuation/portfolio`) | `tools/verify_sprint_1-4-b.sh` |
+| Sprint 1-4.B | valuation-service | Runtime Guard (`guardrails.py`) | `tools/verify_sprint_1-4-b.sh` |
+| Sprint 1-4.B | valuation-service | Price/FX Stub Providers | `tools/verify_sprint_1-4-b.sh` |
 | Sprint 2 | radar-service | Strategy Engine 可插拔架構 (`strategy_engine/`) | `tools/verify_sprint_2.sh` |
 | Sprint 2 | radar-service | v1.4 Plugin (EDS 計分制) (`plugins/v1_4/`) | - |
 | Sprint 2 | radar-service | `GET /radar/decision` 端點 | - |
