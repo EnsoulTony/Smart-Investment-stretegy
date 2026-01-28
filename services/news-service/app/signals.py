@@ -76,6 +76,7 @@ class NewsDraft:
     title: str
     summary_zh: str
     published_at: str
+    source_url: str
 
 
 def get_factor_group(symbol: str) -> str:
@@ -216,30 +217,35 @@ def build_stub_news(as_of: str) -> List[NewsDraft]:
             title="Fed 利率決議前夕，10年期殖利率飆升至4.7%，TSLA 大跌",
             summary_zh="市場開始 reprice，交易員認為通膨壓力升溫。",
             published_at=f"{as_of}T09:00:00Z",
+            source_url="https://www.federalreserve.gov/newsevents/pressreleases.htm",
         ),
         NewsDraft(
             id="stub-002",
             title="OPEC 封鎖傳聞推升油價飆升，OXY 與 CCJ 大漲",
             summary_zh="供應中斷疑慮升溫，WTI 接近 90。",
             published_at=f"{as_of}T11:30:00Z",
+            source_url="https://www.opec.org/opec_web/en/press_room/press_room.htm",
         ),
         NewsDraft(
             id="stub-003",
             title="ECB 討論降息時程，歐股小幅走高",
             summary_zh="市場關注利率決議訊號。",
             published_at=f"{as_of}T12:15:00Z",
+            source_url="https://www.ecb.europa.eu/press/pr/date/html/index.en.html",
         ),
         NewsDraft(
             id="stub-004",
             title="美國宣布新增出口管制，影響 AI 伺服器供應鏈",
             summary_zh="部分廠商評估調整庫存與出貨。",
             published_at=f"{as_of}T13:45:00Z",
+            source_url="https://www.commerce.gov/news/press-releases",
         ),
         NewsDraft(
             id="stub-005",
             title="核能新訂單帶動電網升級，台灣 1.2 GW 計畫啟動",
             summary_zh="專案聚焦供電容量與合約節點。",
             published_at=f"{as_of}T15:00:00Z",
+            source_url="https://www.energy.gov/ne",
         ),
     ]
 
@@ -269,7 +275,7 @@ def build_signal_items(as_of: str, user_id: str = "tony") -> List[dict]:
             "title": draft.title,
             "published_at": draft.published_at,
             "summary_zh": draft.summary_zh,
-            "source_url": f"https://example.com/news/{draft.id}",
+            "source_url": draft.source_url,
             "symbols": symbols,
             "factor_groups": factor_groups,
             "themes": themes,

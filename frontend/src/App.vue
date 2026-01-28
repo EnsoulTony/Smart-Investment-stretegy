@@ -33,6 +33,15 @@ const lastUpdated = ref("");
 
 const n1Items = computed(() => newsItems.value.filter((item) => item.tier === "N1"));
 const n3Items = computed(() => newsItems.value.filter((item) => item.tier === "N3"));
+const decisionSummary = computed(() => {
+  if (!decisionPackage.value) {
+    return "尚未產生融合決策說明";
+  }
+  const n1 = decisionPackage.value.evidence?.news_context?.tiers_count?.N1 ?? 0;
+  const n3 = decisionPackage.value.evidence?.news_context?.tiers_count?.N3 ?? 0;
+  const score = decisionPackage.value.evidence?.news_context?.score_impact?.risk_off_score_added ?? 0;
+  return `N1=${n1}、N3=${n3}，新聞風險分數影響 ${score}，融合後模式為 ${decisionPackage.value.mode}，決策為 ${decisionPackage.value.decision}。`;
+});
 
 const fetchNewsSignals = async () => {
   newsLoading.value = true;
@@ -99,6 +108,87 @@ onMounted(fetchAll);
 
     <section class="panel">
       <div class="panel-header">
+        <h2>戰情室｜新聞訊號</h2>
+        <span class="badge">news-service</span>
+      </div>
+
+      <div v-if="newsError" class="error">
+        {{ newsError }}
+      </div>
+
+      <div v-else class="news-grid">
+        <div class="tier">
+          <div class="tier-header">
+            <h3>N1：市場重定價</h3>
+            <span class="count">{{ n1Items.length }}</span>
+          </div>
+          <div v-if="n1Items.length === 0" class="empty">目前沒有 N1</div>
+          <article v-for="item in n1Items" :key="item.id" class="news-card n1">
+            <h4>{{ item.title }}</h4>
+            <p>{{ item.summary_zh }}</p>
+            <a
+              v-if="item.source_url"
+              class="news-link"
+              :href="item.source_url"
+              target="_blank"
+              rel="noopener noreferrer"
+            >
+              開啟原文
+            </a>
+            <div class="meta">
+              <span>{{ item.published_at }}</span>
+              <span>Symbols: {{ item.symbols.join(", ") || "-" }}</span>
+            </div>
+            <div class="meta">
+              <span>Groups: {{ item.factor_groups.join(", ") || "-" }}</span>
+              <span>Themes: {{ item.themes.join(", ") || "-" }}</span>
+            </div>
+            <div class="trigger">
+              <span v-for="(t, idx) in item.falsifiable_triggers" :key="idx">
+                {{ t.name }} · {{ t.condition }} · {{ t.value }}
+              </span>
+            </div>
+          </article>
+        </div>
+
+        <div class="tier">
+          <div class="tier-header">
+            <h3>N3：值得追蹤</h3>
+            <span class="count">{{ n3Items.length }}</span>
+          </div>
+          <div v-if="n3Items.length === 0" class="empty">目前沒有 N3</div>
+          <article v-for="item in n3Items" :key="item.id" class="news-card">
+            <h4>{{ item.title }}</h4>
+            <p>{{ item.summary_zh }}</p>
+            <a
+              v-if="item.source_url"
+              class="news-link"
+              :href="item.source_url"
+              target="_blank"
+              rel="noopener noreferrer"
+            >
+              開啟原文
+            </a>
+            <div class="meta">
+              <span>{{ item.published_at }}</span>
+              <span>Symbols: {{ item.symbols.join(", ") || "-" }}</span>
+            </div>
+            <div class="meta">
+              <span>Groups: {{ item.factor_groups.join(", ") || "-" }}</span>
+              <span>Themes: {{ item.themes.join(", ") || "-" }}</span>
+            </div>
+            <div class="trigger">
+              <span v-for="(t, idx) in item.falsifiable_triggers" :key="idx">
+                {{ t.name }} · {{ t.condition }} · {{ t.value }}
+              </span>
+            </div>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <section class="panel">
+      <div class="panel-header">
         <h2>戰情室｜融合決策包</h2>
         <span class="badge">radar-service</span>
       </div>
@@ -136,6 +226,11 @@ onMounted(fetchAll);
           </div>
         </div>
 
+        <div class="decision-card">
+          <p class="section-title">融合決策說明</p>
+          <p class="decision-text">{{ decisionSummary }}</p>
+        </div>
+
         <div class="decision-card wide">
           <p class="section-title">決策過程（scoring_detail）</p>
           <pre class="code-block">
@@ -162,69 +257,6 @@ onMounted(fetchAll);
       </div>
 
       <div v-else class="empty">尚未取得決策包</div>
-    </section>
-
-    <section class="panel">
-      <div class="panel-header">
-        <h2>戰情室｜新聞訊號</h2>
-        <span class="badge">news-service</span>
-      </div>
-
-      <div v-if="newsError" class="error">
-        {{ newsError }}
-      </div>
-
-      <div v-else class="news-grid">
-        <div class="tier">
-          <div class="tier-header">
-            <h3>N1：市場重定價</h3>
-            <span class="count">{{ n1Items.length }}</span>
-          </div>
-          <div v-if="n1Items.length === 0" class="empty">目前沒有 N1</div>
-          <article v-for="item in n1Items" :key="item.id" class="news-card n1">
-            <h4>{{ item.title }}</h4>
-            <p>{{ item.summary_zh }}</p>
-            <div class="meta">
-              <span>{{ item.published_at }}</span>
-              <span>Symbols: {{ item.symbols.join(", ") || "-" }}</span>
-            </div>
-            <div class="meta">
-              <span>Groups: {{ item.factor_groups.join(", ") || "-" }}</span>
-              <span>Themes: {{ item.themes.join(", ") || "-" }}</span>
-            </div>
-            <div class="trigger">
-              <span v-for="(t, idx) in item.falsifiable_triggers" :key="idx">
-                {{ t.name }} · {{ t.condition }} · {{ t.value }}
-              </span>
-            </div>
-          </article>
-        </div>
-
-        <div class="tier">
-          <div class="tier-header">
-            <h3>N3：值得追蹤</h3>
-            <span class="count">{{ n3Items.length }}</span>
-          </div>
-          <div v-if="n3Items.length === 0" class="empty">目前沒有 N3</div>
-          <article v-for="item in n3Items" :key="item.id" class="news-card">
-            <h4>{{ item.title }}</h4>
-            <p>{{ item.summary_zh }}</p>
-            <div class="meta">
-              <span>{{ item.published_at }}</span>
-              <span>Symbols: {{ item.symbols.join(", ") || "-" }}</span>
-            </div>
-            <div class="meta">
-              <span>Groups: {{ item.factor_groups.join(", ") || "-" }}</span>
-              <span>Themes: {{ item.themes.join(", ") || "-" }}</span>
-            </div>
-            <div class="trigger">
-              <span v-for="(t, idx) in item.falsifiable_triggers" :key="idx">
-                {{ t.name }} · {{ t.condition }} · {{ t.value }}
-              </span>
-            </div>
-          </article>
-        </div>
-      </div>
     </section>
 
     <section class="panel subtle">
@@ -415,6 +447,13 @@ strong {
   color: #94a3b8;
 }
 
+.decision-text {
+  margin: 0;
+  font-size: 0.9rem;
+  color: #cbd5f5;
+  line-height: 1.5;
+}
+
 .pill-row {
   display: flex;
   gap: 0.5rem;
@@ -522,6 +561,18 @@ strong {
   margin: 0;
   color: #cbd5f5;
   font-size: 0.9rem;
+}
+
+.news-link {
+  display: inline-flex;
+  width: fit-content;
+  font-size: 0.75rem;
+  color: #93c5fd;
+  text-decoration: none;
+}
+
+.news-link:hover {
+  text-decoration: underline;
 }
 
 .meta {
