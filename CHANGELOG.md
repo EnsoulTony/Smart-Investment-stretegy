@@ -1,5 +1,18 @@
 # CHANGELOG.md｜版本沿革
 
+## [0.2.8] - 2026-01-28（Sprint 4：Decision Fusion + Snapshot）
+- **radar-service：融合 news_signals + 決策快照**
+  - `/radar/decision` 讀取 `news_signals`（DB）並產出 `evidence.news_context`
+  - 決策結果落地 `decision_snapshots`（idempotent upsert）
+  - 新增 `/radar/decisions/history` 供 UI 讀取快照
+- **DB migration**
+  - 新增 `decision_snapshots` 表與唯一索引 `(user_id, as_of, plugin)`
+- **驗收與測試**
+  - 新增 `tools/verify_sprint_4.sh`（seed news_signals → radar fusion → snapshot idempotency → pytest）
+  - 新增 radar-service 測試：fusion scoring、upsert idempotency、API schema
+- **api-gateway**
+  - 新增 `/radar/decision` 與 `/radar/decisions/history` 轉發
+
 ## [0.2.5] - 2026-01-28（Sprint 3：news_signals 落地 + War Room 串接 api-gateway）
 - **news-service：news_signals 落地**
   - 新增 news-service Alembic migration，建立 `public.news_signals` 表

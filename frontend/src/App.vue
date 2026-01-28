@@ -26,6 +26,9 @@ const asOf = ref(new Date().toISOString().slice(0, 10));
 const newsItems = ref([]);
 const newsError = ref("");
 const newsLoading = ref(false);
+const decisionPackage = ref(null);
+const decisionError = ref("");
+const decisionLoading = ref(false);
 const lastUpdated = ref("");
 
 const n1Items = computed(() => newsItems.value.filter((item) => item.tier === "N1"));
@@ -50,7 +53,28 @@ const fetchNewsSignals = async () => {
   }
 };
 
-onMounted(fetchNewsSignals);
+const fetchDecisionPackage = async () => {
+  decisionLoading.value = true;
+  decisionError.value = "";
+  try {
+    const url = `${API_BASE_URL}/radar/decision?user_id=${USER_ID}&as_of=${asOf.value}&base_ccy=TWD&plugin=v1.4`;
+    const response = await fetch(url);
+    if (!response.ok) {
+      throw new Error(`radar-service ${response.status}`);
+    }
+    decisionPackage.value = await response.json();
+  } catch (err) {
+    decisionError.value = err?.message || "api-gateway 連線失敗";
+  } finally {
+    decisionLoading.value = false;
+  }
+};
+
+const fetchAll = async () => {
+  await Promise.all([fetchNewsSignals(), fetchDecisionPackage()]);
+};
+
+onMounted(fetchAll);
 </script>
 
 <template>
@@ -63,15 +87,82 @@ onMounted(fetchNewsSignals);
       </div>
       <div class="hero-card">
         <div>
-          <p class="label">as_of</p>
-          <p class="value">{{ asOf }}</p>
-        </div>
-        <button class="refresh" type="button" @click="fetchNewsSignals" :disabled="newsLoading">
-          {{ newsLoading ? "讀取中..." : "重新整理" }}
+        <p class="label">as_of</p>
+        <p class="value">{{ asOf }}</p>
+      </div>
+        <button class="refresh" type="button" @click="fetchAll" :disabled="newsLoading || decisionLoading">
+          {{ newsLoading || decisionLoading ? "讀取中..." : "重新整理" }}
         </button>
         <p class="timestamp" v-if="lastUpdated">更新時間：{{ lastUpdated }}</p>
       </div>
     </header>
+
+    <section class="panel">
+      <div class="panel-header">
+        <h2>戰情室｜融合決策包</h2>
+        <span class="badge">radar-service</span>
+      </div>
+
+      <div v-if="decisionError" class="error">
+        {{ decisionError }}
+      </div>
+
+      <div v-else-if="decisionPackage" class="decision-grid">
+        <div class="decision-card">
+          <p class="section-title">決策摘要</p>
+          <div class="pill-row">
+            <span class="pill">{{ decisionPackage.mode }}</span>
+            <span class="pill pill-accent">{{ decisionPackage.decision }}</span>
+          </div>
+          <p class="hash">inputs_hash: {{ decisionPackage.evidence?.inputs_hash }}</p>
+        </div>
+
+        <div class="decision-card">
+          <p class="section-title">新聞融合影響</p>
+          <div class="meta">
+            <span>N1：{{ decisionPackage.evidence?.news_context?.tiers_count?.N1 ?? 0 }}</span>
+            <span>N3：{{ decisionPackage.evidence?.news_context?.tiers_count?.N3 ?? 0 }}</span>
+            <span>Risk score：{{ decisionPackage.evidence?.news_context?.score_impact?.risk_off_score_added ?? 0 }}</span>
+          </div>
+          <p class="section-subtitle">引用新聞</p>
+          <div class="tag-list">
+            <span
+              v-for="(item, idx) in decisionPackage.evidence?.news_context?.items_used || []"
+              :key="`${item}-${idx}`"
+              class="tag"
+            >
+              {{ item }}
+            </span>
+          </div>
+        </div>
+
+        <div class="decision-card wide">
+          <p class="section-title">決策過程（scoring_detail）</p>
+          <pre class="code-block">
+{{ JSON.stringify(decisionPackage.evidence?.scoring_detail || {}, null, 2) }}
+          </pre>
+        </div>
+
+        <div class="decision-card wide">
+          <p class="section-title">融合後 actions + triggers</p>
+          <div v-if="(decisionPackage.actions || []).length === 0" class="empty">目前沒有 action</div>
+          <div v-else class="action-grid">
+            <article v-for="action in decisionPackage.actions" :key="action.symbol" class="action-card">
+              <h4>{{ action.symbol }}</h4>
+              <p class="pill">{{ action.action }}</p>
+              <p class="meta">{{ action.reason }}</p>
+              <div class="trigger">
+                <span v-for="(t, idx) in action.falsifiable_triggers" :key="idx">
+                  {{ t.name }} · {{ t.condition }} · {{ t.value }}
+                </span>
+              </div>
+            </article>
+          </div>
+        </div>
+      </div>
+
+      <div v-else class="empty">尚未取得決策包</div>
+    </section>
 
     <section class="panel">
       <div class="panel-header">
@@ -289,6 +380,105 @@ strong {
   background: rgba(148, 163, 184, 0.2);
   border-radius: 999px;
   color: #e2e8f0;
+}
+
+.decision-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 1.25rem;
+}
+
+.decision-card {
+  background: rgba(15, 23, 42, 0.9);
+  border: 1px solid rgba(148, 163, 184, 0.2);
+  border-radius: 14px;
+  padding: 1rem;
+  display: grid;
+  gap: 0.75rem;
+}
+
+.decision-card.wide {
+  grid-column: 1 / -1;
+}
+
+.section-title {
+  margin: 0;
+  font-size: 0.95rem;
+  color: #e2e8f0;
+}
+
+.section-subtitle {
+  margin: 0.5rem 0 0;
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: #94a3b8;
+}
+
+.pill-row {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.pill {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0.3rem 0.7rem;
+  border-radius: 999px;
+  background: rgba(59, 130, 246, 0.2);
+  color: #bfdbfe;
+  font-size: 0.75rem;
+}
+
+.pill-accent {
+  background: rgba(34, 197, 94, 0.2);
+  color: #bbf7d0;
+}
+
+.hash {
+  font-size: 0.75rem;
+  color: #94a3b8;
+  word-break: break-all;
+}
+
+.tag-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+
+.tag {
+  background: rgba(148, 163, 184, 0.2);
+  padding: 0.2rem 0.5rem;
+  border-radius: 8px;
+  font-size: 0.7rem;
+  color: #e2e8f0;
+}
+
+.code-block {
+  background: rgba(8, 12, 25, 0.9);
+  color: #c7d2fe;
+  font-size: 0.75rem;
+  padding: 1rem;
+  border-radius: 12px;
+  overflow-x: auto;
+}
+
+.action-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 1rem;
+}
+
+.action-card {
+  background: rgba(11, 18, 32, 0.95);
+  border: 1px solid rgba(148, 163, 184, 0.2);
+  border-radius: 12px;
+  padding: 0.8rem;
+  display: grid;
+  gap: 0.4rem;
 }
 
 .news-grid {

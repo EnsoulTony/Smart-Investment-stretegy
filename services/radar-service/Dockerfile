@@ -13,6 +13,8 @@ RUN pip install --no-cache-dir -r /tmp/base-requirements.txt -r /tmp/service-req
 
 COPY services/radar-service/app /app/app
 COPY services/radar-service/tests /app/tests
+COPY services/radar-service/alembic.ini /app/alembic.ini
+COPY services/radar-service/alembic /app/alembic
 
 ENV PORT=8002
 ENV SERVICE_NAME=radar-service

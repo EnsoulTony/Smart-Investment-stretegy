@@ -30,6 +30,12 @@
 轉發至 news-service 的 `GET /news/signals` 端點（戰情室 UI 入口）。
 （前端統一透過 api-gateway 呼叫，避免跨域與服務直連）
 
+### `GET /radar/decision`
+轉發至 radar-service 的 `GET /radar/decision` 端點（決策融合結果）。
+
+### `GET /radar/decisions/history`
+轉發至 radar-service 的 `GET /radar/decisions/history` 端點（快照歷史）。
+
 ### `GET /dashboard`
 ```json
 {
@@ -343,7 +349,7 @@ GET /valuation/portfolio?user_id=tony&base_ccy=USD
 
 ## 4. radar-service
 
-### `GET /radar/decision`（Sprint 2 新增）
+### `GET /radar/decision`（Sprint 4 擴充）
 
 取得策略決策建議。整合 portfolio-service 持倉與 indicator-service 指標，透過 Strategy Engine 產出建議。
 
@@ -383,6 +389,11 @@ GET /radar/decision?user_id=tony&base_ccy=TWD&plugin=v1.4
     "engine": "strategy_engine",
     "plugin": "v1.4",
     "inputs_hash": "a1b2c3d4e5f6...",
+    "news_context": {
+      "tiers_count": { "N1": 2, "N3": 3 },
+      "items_used": ["stub-n1", "stub-n3"],
+      "score_impact": { "risk_off_score_added": 5.0, "n1_score": 4.0, "n3_score": 1.0 }
+    },
     "notes": ["mode=RISK_ON with balanced exposure"],
     "scoring_detail": { "score_on": 5, "score_off": 0, "rules": {...}, "exposure": {...} }
   }
@@ -396,6 +407,7 @@ GET /radar/decision?user_id=tony&base_ccy=TWD&plugin=v1.4
 | `mode` | `RISK_ON` / `RISK_OFF` / `TRANSITION` |
 | `decision` | `NO_ACTION` / `REDUCE_RISK` / `REBALANCE` / `WATCHLIST` |
 | `evidence.inputs_hash` | canonical JSON SHA256（64 字元） |
+| `evidence.news_context` | 新聞融合資訊（tiers_count/items_used/score_impact） |
 | `actions[].falsifiable_triggers` | 至少 1 個推翻條件 |
 | `actions[].constraints.cooldown_days` | 固定 5 天 |
 
@@ -417,6 +429,28 @@ GET /radar/decision?user_id=tony&base_ccy=TWD&plugin=v1.4
 > **責任歸屬**：
 > - **indicator-service**：provider 不可用或資料不完整 → 回傳 503（`provider_error`）
 > - **radar-service**：上游連線失敗 → 502；上游回應但缺欄位 → 503（`missing_data`）
+
+### `GET /radar/decisions/history`（Sprint 4 新增）
+
+取得決策快照歷史（由 decision_snapshots 落地）。
+
+**Request**
+```
+GET /radar/decisions/history?user_id=tony&limit=30
+```
+
+**Response 200 OK**
+```json
+[
+  {
+    "as_of": "2026-01-28",
+    "mode": "RISK_ON",
+    "decision": "NO_ACTION",
+    "inputs_hash": "a1b2c3d4e5f6...",
+    "created_at": "2026-01-28T00:00:00Z"
+  }
+]
+```
 
 ### Legacy 結構（保留相容）
 

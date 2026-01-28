@@ -28,6 +28,7 @@ Smart-Investment-Strategy 採微服務架構，分為前端、API Gateway、四�
 - Sprint 1：portfolio-service + valuation-service guardrails（估值層 HTTP-only）
 - Sprint 2：radar-service Strategy Engine + indicator-service（指標讀取）
 - Sprint 3：news-service N1/N3 signals（可回歸）+ portfolio-service core_holdings（本地 DB 設定）
+- Sprint 4：radar-service Decision Fusion + decision_snapshots（news_signals 融合 + 快照落地）
 
 **服務埠號對照**
 
@@ -60,6 +61,8 @@ Smart-Investment-Strategy 採微服務架構，分為前端、API Gateway、四�
   - 執行 Strategy Engine（可插拔架構）。
   - 內含 v1.4 Plugin（EDS 最小可行）。
   - 透過 HTTP 呼叫 `portfolio-service` 取得持倉、`indicator-service` 取得指標。
+  - 透過 DB 讀取 `news_signals` 並融合風險分數，輸出單一決策包。
+  - 決策結果落地到 `decision_snapshots`（idempotent upsert）。
   - 端點：`GET /radar/decision?user_id=X&base_ccy=TWD`
 - **indicator-service**（Sprint 2 新增）：
   - 提供 XLU/XLK sector rotation 指標。
@@ -89,6 +92,7 @@ Smart-Investment-Strategy 採微服務架構，分為前端、API Gateway、四�
 4. `news-service` 以請求時點（as_of）產出 news signals，並引用 `core_holdings` 輔助打分/映射（不直接讀 DB）。
 5. `news-service` 同步將 signals 落地至 `news_signals` 表。
 6. `api-gateway` 聚合上述資料 → 提供戰情室 UI（前端統一走 gateway）。
+7. `radar-service` 讀取 `news_signals` + 指標快照 → 融合決策並落地 `decision_snapshots`。
 
 ## 部署拓樸
 

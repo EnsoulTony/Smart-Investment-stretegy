@@ -60,6 +60,31 @@ MOCK_INDICATORS_RESPONSE = {
     },
 }
 
+MOCK_NEWS_SIGNALS = [
+    {
+        "signal_id": "stub-n1",
+        "tier": "N1",
+        "payload": {
+            "tier": "N1",
+            "falsifiable_triggers": [
+                {"type": "market", "name": "US10Y", "condition": "break_above_4.5", "value": 4.5}
+            ],
+        },
+        "signal_hash": "hash-n1",
+    },
+    {
+        "signal_id": "stub-n3",
+        "tier": "N3",
+        "payload": {
+            "tier": "N3",
+            "falsifiable_triggers": [
+                {"type": "market", "name": "WTI", "condition": "break_above_90", "value": 90}
+            ],
+        },
+        "signal_hash": "hash-n3",
+    },
+]
+
 
 def make_mock_httpx_client(positions_response, indicators_response):
     """Create mock httpx.AsyncClient that returns specified responses."""
@@ -94,9 +119,12 @@ def make_mock_httpx_client(positions_response, indicators_response):
 class TestRadarDecisionEndpoint:
     """Test GET /radar/decision with mocked upstream services."""
 
+    @patch("app.main.upsert_decision_snapshot")
+    @patch("app.main.fetch_news_signals")
     @patch("httpx.AsyncClient")
-    def test_decision_returns_200(self, mock_client_class) -> None:
+    def test_decision_returns_200(self, mock_client_class, mock_fetch_news, mock_upsert) -> None:
         """Valid request returns 200."""
+        mock_fetch_news.return_value = MOCK_NEWS_SIGNALS
         mock_client_class.return_value = make_mock_httpx_client(
             MOCK_POSITIONS_RESPONSE, MOCK_INDICATORS_RESPONSE
         )
@@ -105,9 +133,12 @@ class TestRadarDecisionEndpoint:
 
         assert response.status_code == 200
 
+    @patch("app.main.upsert_decision_snapshot")
+    @patch("app.main.fetch_news_signals")
     @patch("httpx.AsyncClient")
-    def test_decision_contains_evidence_inputs_hash(self, mock_client_class) -> None:
+    def test_decision_contains_evidence_inputs_hash(self, mock_client_class, mock_fetch_news, mock_upsert) -> None:
         """Response must contain evidence.inputs_hash."""
+        mock_fetch_news.return_value = MOCK_NEWS_SIGNALS
         mock_client_class.return_value = make_mock_httpx_client(
             MOCK_POSITIONS_RESPONSE, MOCK_INDICATORS_RESPONSE
         )
@@ -119,9 +150,12 @@ class TestRadarDecisionEndpoint:
         assert "inputs_hash" in data["evidence"]
         assert len(data["evidence"]["inputs_hash"]) == 64  # SHA256
 
+    @patch("app.main.upsert_decision_snapshot")
+    @patch("app.main.fetch_news_signals")
     @patch("httpx.AsyncClient")
-    def test_decision_contains_required_fields(self, mock_client_class) -> None:
+    def test_decision_contains_required_fields(self, mock_client_class, mock_fetch_news, mock_upsert) -> None:
         """Response contains all required OutputSchema fields."""
+        mock_fetch_news.return_value = MOCK_NEWS_SIGNALS
         mock_client_class.return_value = make_mock_httpx_client(
             MOCK_POSITIONS_RESPONSE, MOCK_INDICATORS_RESPONSE
         )
@@ -137,6 +171,8 @@ class TestRadarDecisionEndpoint:
         assert "decision" in data
         assert "actions" in data
         assert "evidence" in data
+        assert "news_context" in data["evidence"]
+        assert "tiers_count" in data["evidence"]["news_context"]
 
         # Mode must be valid
         assert data["mode"] in ["RISK_ON", "RISK_OFF", "TRANSITION"]
@@ -144,9 +180,12 @@ class TestRadarDecisionEndpoint:
         # Decision must be valid
         assert data["decision"] in ["NO_ACTION", "REDUCE_RISK", "REBALANCE", "WATCHLIST"]
 
+    @patch("app.main.upsert_decision_snapshot")
+    @patch("app.main.fetch_news_signals")
     @patch("httpx.AsyncClient")
-    def test_decision_actions_have_triggers(self, mock_client_class) -> None:
+    def test_decision_actions_have_triggers(self, mock_client_class, mock_fetch_news, mock_upsert) -> None:
         """Actions must have at least 1 falsifiable trigger."""
+        mock_fetch_news.return_value = MOCK_NEWS_SIGNALS
         mock_client_class.return_value = make_mock_httpx_client(
             MOCK_POSITIONS_RESPONSE, MOCK_INDICATORS_RESPONSE
         )
@@ -160,9 +199,12 @@ class TestRadarDecisionEndpoint:
             assert len(action["falsifiable_triggers"]) >= 1, \
                 f"Action {action.get('symbol')} has no triggers"
 
+    @patch("app.main.upsert_decision_snapshot")
+    @patch("app.main.fetch_news_signals")
     @patch("httpx.AsyncClient")
-    def test_decision_actions_have_cooldown_5(self, mock_client_class) -> None:
+    def test_decision_actions_have_cooldown_5(self, mock_client_class, mock_fetch_news, mock_upsert) -> None:
         """All actions should have cooldown_days=5."""
+        mock_fetch_news.return_value = MOCK_NEWS_SIGNALS
         mock_client_class.return_value = make_mock_httpx_client(
             MOCK_POSITIONS_RESPONSE, MOCK_INDICATORS_RESPONSE
         )
@@ -174,9 +216,12 @@ class TestRadarDecisionEndpoint:
             assert "constraints" in action
             assert action["constraints"].get("cooldown_days") == 5
 
+    @patch("app.main.upsert_decision_snapshot")
+    @patch("app.main.fetch_news_signals")
     @patch("httpx.AsyncClient")
-    def test_decision_with_empty_positions(self, mock_client_class) -> None:
+    def test_decision_with_empty_positions(self, mock_client_class, mock_fetch_news, mock_upsert) -> None:
         """Empty positions should still return valid response."""
+        mock_fetch_news.return_value = MOCK_NEWS_SIGNALS
         mock_client_class.return_value = make_mock_httpx_client(
             {"user_id": "tony", "items": [], "next_cursor": None},
             MOCK_INDICATORS_RESPONSE,

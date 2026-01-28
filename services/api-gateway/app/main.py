@@ -9,6 +9,7 @@ from typing import Any
 SERVICE_NAME = os.getenv("SERVICE_NAME", "api-gateway")
 PORTFOLIO_SERVICE_URL = os.getenv("PORTFOLIO_SERVICE_URL", "http://portfolio-service:8001")
 NEWS_SERVICE_URL = os.getenv("NEWS_SERVICE_URL", "http://news-service:8003")
+RADAR_SERVICE_URL = os.getenv("RADAR_SERVICE_URL", "http://radar-service:8002")
 CORS_ALLOW_ORIGINS = os.getenv(
     "CORS_ALLOW_ORIGINS",
     "http://localhost:8080,http://127.0.0.1:8080",
@@ -153,6 +154,68 @@ async def proxy_news_signals(request: Request) -> Any:
         raise HTTPException(
             status_code=503,
             detail=f"無法連線到 News Service: {str(e)}",
+        )
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"轉發請求時發生錯誤: {str(e)}",
+        )
+
+
+# ============================================================================
+# Radar Service 反向代理路由
+# ============================================================================
+
+@app.get("/radar/decision", tags=["radar"])
+async def proxy_radar_decision(request: Request) -> Any:
+    """轉發雷達決策請求到 Radar Service。"""
+    target_url = f"{RADAR_SERVICE_URL}/radar/decision"
+    try:
+        async with httpx.AsyncClient() as client:
+            response = await client.get(
+                target_url,
+                params=dict(request.query_params),
+                timeout=10.0,
+            )
+        return Response(
+            content=response.content,
+            status_code=response.status_code,
+            headers=dict(response.headers),
+            media_type="application/json",
+        )
+    except httpx.RequestError as e:
+        raise HTTPException(
+            status_code=503,
+            detail=f"無法連線到 Radar Service: {str(e)}",
+        )
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"轉發請求時發生錯誤: {str(e)}",
+        )
+
+
+@app.get("/radar/decisions/history", tags=["radar"])
+async def proxy_radar_decisions_history(request: Request) -> Any:
+    """轉發雷達決策歷史請求到 Radar Service。"""
+    target_url = f"{RADAR_SERVICE_URL}/radar/decisions/history"
+    try:
+        async with httpx.AsyncClient() as client:
+            response = await client.get(
+                target_url,
+                params=dict(request.query_params),
+                timeout=10.0,
+            )
+        return Response(
+            content=response.content,
+            status_code=response.status_code,
+            headers=dict(response.headers),
+            media_type="application/json",
+        )
+    except httpx.RequestError as e:
+        raise HTTPException(
+            status_code=503,
+            detail=f"無法連線到 Radar Service: {str(e)}",
         )
     except Exception as e:
         raise HTTPException(

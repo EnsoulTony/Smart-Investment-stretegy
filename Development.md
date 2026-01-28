@@ -11,6 +11,10 @@
 5. **測試與驗證**：執行 `TESTING.md` 列出的指令，確保健康檢查與單元測試通過。
 6. **部署準備**：更新 `CHANGELOG.md`、確認 `DEPLOYMENT.md` 流程、觸發 GitHub Actions。
 
+## Sprint 驗收（補充）
+
+- Sprint 4：`./tools/verify_sprint_4.sh`
+
 ## 硬隔離規則（必遵守）
 
 - **服務容器不得持有超出職責範圍的敏感連線設定**。

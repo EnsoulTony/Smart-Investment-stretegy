@@ -11,6 +11,18 @@ import httpx
 from fastapi import FastAPI, Query, HTTPException
 from fastapi.responses import JSONResponse
 
+from .db import (
+    fetch_news_signals,
+    upsert_decision_snapshot,
+    fetch_decision_history,
+    build_news_inputs,
+)
+from .news_fusion import (
+    compute_news_score,
+    apply_news_mode_override,
+    build_triggers,
+    attach_news_triggers,
+)
 from .strategy_engine import InputSchema, OutputSchema, get_default_engine
 from .strategy_engine.engine import MissingDataException
 from .strategy_engine.schemas import (
@@ -183,8 +195,27 @@ async def get_decision(
         base_ccy=base_ccy,
         positions=positions,
         indicators=indicators,
-        signals=SignalsInput(news=[], research=[]),
+        signals=SignalsInput(
+            news=[],
+            research=[],
+        ),
     )
+
+    # Fetch news_signals from DB (normal path)
+    try:
+        news_signals = fetch_news_signals(user_id=user_id, as_of=as_of_date)
+    except Exception as e:
+        raise HTTPException(
+            status_code=502,
+            detail={
+                "status": "upstream_error",
+                "service": "postgres",
+                "message": f"DB read failed: {str(e)}",
+            },
+        )
+
+    news_inputs = build_news_inputs(news_signals)
+    input_schema.signals.news = news_inputs
 
     # Execute strategy plugin
     try:
@@ -204,6 +235,70 @@ async def get_decision(
             detail={
                 "status": "plugin_error",
                 "message": str(e),
+            },
+        )
+
+    # News fusion: scoring + mode override + triggers
+    n1_count = sum(1 for signal in news_signals if signal.get("tier") == "N1")
+    n3_count = sum(1 for signal in news_signals if signal.get("tier") == "N3")
+    score_impact = {
+        "risk_off_score_added": compute_news_score(n1_count, n3_count),
+        "n1_score": n1_count * 2.0,
+        "n3_score": min(2.0, n3_count * 0.5),
+    }
+
+    n1_raw_triggers = []
+    n3_raw_triggers = []
+    items_used = []
+    for signal in news_signals:
+        items_used.append(signal.get("signal_id"))
+        payload = signal.get("payload") or {}
+        triggers = payload.get("falsifiable_triggers") or []
+        if signal.get("tier") == "N1":
+            n1_raw_triggers.extend(triggers)
+        else:
+            n3_raw_triggers.extend(triggers)
+
+    n1_triggers = build_triggers(n1_raw_triggers)
+    n3_triggers = build_triggers(n3_raw_triggers)
+
+    output.actions, watchlist_triggers = attach_news_triggers(
+        output.actions, n1_triggers, n3_triggers
+    )
+
+    original_mode = output.mode
+    output.mode = apply_news_mode_override(output.mode, n1_count)
+    if output.mode != original_mode:
+        output.evidence.notes.append(
+            f"news_fusion: mode override {original_mode.value} -> {output.mode.value}"
+        )
+
+    output.evidence.news_context = {
+        "tiers_count": {"N1": n1_count, "N3": n3_count},
+        "items_used": items_used,
+        "score_impact": score_impact,
+        "watchlist_triggers": [t.model_dump() for t in watchlist_triggers],
+        "primary_triggers": [t.model_dump() for t in n1_triggers],
+    }
+
+    # Persist decision snapshot (idempotent)
+    try:
+        upsert_decision_snapshot(
+            user_id=user_id,
+            as_of=as_of_date,
+            plugin=plugin,
+            mode=output.mode.value,
+            decision=output.decision.value,
+            inputs_hash=output.evidence.inputs_hash,
+            payload=output.model_dump(),
+        )
+    except Exception as e:
+        raise HTTPException(
+            status_code=502,
+            detail={
+                "status": "upstream_error",
+                "service": "postgres",
+                "message": f"DB write failed: {str(e)}",
             },
         )
 
@@ -297,3 +392,22 @@ async def list_plugins() -> dict:
         "plugins": plugins_info,
         "default": "v1.4",
     }
+
+
+@app.get("/radar/decisions/history", tags=["radar"])
+async def get_decision_history(
+    user_id: str = Query(..., description="User ID for decision history lookup"),
+    limit: int = Query(default=30, ge=1, le=100, description="Max history rows"),
+) -> list[dict]:
+    """Return recent decision snapshots for a user."""
+    try:
+        return fetch_decision_history(user_id=user_id, limit=limit)
+    except Exception as e:
+        raise HTTPException(
+            status_code=502,
+            detail={
+                "status": "upstream_error",
+                "service": "postgres",
+                "message": f"DB read failed: {str(e)}",
+            },
+        )

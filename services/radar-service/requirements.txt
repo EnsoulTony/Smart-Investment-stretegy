@@ -1,2 +1,5 @@
 # Radar Service dependencies
 pydantic>=2.0.0
+alembic==1.13.2
+SQLAlchemy==2.0.32
+psycopg2-binary==2.9.9

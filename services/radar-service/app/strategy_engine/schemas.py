@@ -170,6 +170,9 @@ class Evidence(BaseModel):
     engine: str = Field(default="strategy_engine", description="Engine name")
     plugin: str = Field(..., description="Plugin version (e.g., 'v1.4')")
     inputs_hash: str = Field(..., description="SHA256 of canonical InputSchema JSON")
+    news_context: Optional[dict] = Field(
+        default=None, description="News fusion context (tiers_count/items_used/score_impact)"
+    )
     notes: List[str] = Field(default_factory=list, description="Additional notes")
     scoring_detail: Optional[dict] = Field(
         default=None, description="Detailed scoring breakdown"
