@@ -561,16 +561,31 @@ def list_core_holdings(
     user_id: str = Query(..., min_length=1, description="使用者 ID"),
     service: CoreHoldingsService = Depends(get_core_holdings_service),
 ):
-    symbols = service.list_core_symbols(user_id)
+    rows = service.list_core_holdings(user_id)
+    items = [
+        {
+            "symbol": row.symbol,
+            "name_zh": row.name_zh or "",
+        }
+        for row in rows
+    ]
+    symbols = [row.symbol for row in rows]
     return {
         "user_id": user_id,
+        "items": items,
         "symbols": symbols,
         "count": len(symbols),
     }
 
 
+class CoreHoldingItemRequest(BaseModel):
+    symbol: str
+    name_zh: Optional[str] = None
+
+
 class CoreHoldingsSaveRequest(BaseModel):
     symbols: list[str] = []
+    items: list[CoreHoldingItemRequest] = []
 
 
 @app.post("/portfolio/core_holdings", tags=["portfolio"])
@@ -579,7 +594,11 @@ def save_core_holdings(
     user_id: str = Query(..., min_length=1, description="使用者 ID"),
     service: CoreHoldingsService = Depends(get_core_holdings_service),
 ):
-    saved = service.save_core_holdings(user_id, payload.symbols)
+    if payload.items:
+        items = [(item.symbol, item.name_zh) for item in payload.items]
+    else:
+        items = [(symbol, None) for symbol in payload.symbols]
+    saved = service.save_core_holdings(user_id, items)
     return {
         "status": "ok",
         "user_id": user_id,

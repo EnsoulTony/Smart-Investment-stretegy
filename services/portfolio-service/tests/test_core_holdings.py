@@ -33,7 +33,14 @@ def test_replace_core_holdings_via_post():
     resp = client.post(
         "/portfolio/core_holdings",
         params={"user_id": "tony"},
-        json={"symbols": ["TSLA", "OXY", "tsm", "TSLA"]},
+        json={
+            "items": [
+                {"symbol": "TSLA", "name_zh": "特斯拉"},
+                {"symbol": "OXY", "name_zh": "西方石油"},
+                {"symbol": "tsm", "name_zh": "台積電 ADR"},
+                {"symbol": "TSLA", "name_zh": "特斯拉"},
+            ]
+        },
     )
     assert resp.status_code == 200
     assert resp.json()["count"] == 3
@@ -41,3 +48,6 @@ def test_replace_core_holdings_via_post():
     resp2 = client.get("/portfolio/core_holdings", params={"user_id": "tony"})
     syms = sorted(resp2.json()["symbols"])
     assert syms == ["OXY", "TSLA", "TSM"]
+    items = resp2.json()["items"]
+    name_map = {item["symbol"]: item["name_zh"] for item in items}
+    assert name_map["TSLA"] == "特斯拉"

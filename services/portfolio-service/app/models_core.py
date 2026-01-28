@@ -12,6 +12,7 @@ class CoreHolding(Base):
     id = Column(Integer, primary_key=True, autoincrement=True)
     user_id = Column(Text, nullable=False)
     symbol = Column(Text, nullable=False)
+    name_zh = Column(Text, nullable=True)
     is_core = Column(Boolean, nullable=False, default=True)
     updated_at = Column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc))
 

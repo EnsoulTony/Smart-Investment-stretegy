@@ -61,8 +61,13 @@ const decisionSummary = computed(() => {
   return `N1=${n1}、N3=${n3}，新聞風險分數影響 ${score}，融合後模式為 ${decisionPackage.value.mode}，決策為 ${decisionPackage.value.decision}。`;
 });
 
-const selectedCoreSymbols = computed(() =>
-  holdings.value.filter((item) => item.selected).map((item) => item.symbol),
+const selectedCoreItems = computed(() =>
+  holdings.value
+    .filter((item) => item.selected)
+    .map((item) => ({
+      symbol: item.symbol,
+      name_zh: item.name_zh || "",
+    })),
 );
 const holdingsEmpty = computed(() => holdings.value.length === 0);
 
@@ -125,12 +130,18 @@ const fetchHoldings = async () => {
     const positionNameMap = new Map(
       (positionsData.items || []).map((item) => [item.symbol, item.name_zh]),
     );
-    const coreSymbols = coreData.symbols || [];
+    const coreItems = coreData.items || [];
+    const coreSymbols = coreItems.map((item) => item.symbol);
+    const coreNameMap = new Map(coreItems.map((item) => [item.symbol, item.name_zh]));
     const allSymbols = Array.from(new Set([...positionSymbols, ...coreSymbols])).sort();
     const coreSet = new Set(coreSymbols);
     holdings.value = allSymbols.map((symbol) => ({
       symbol,
-      name: positionNameMap.get(symbol) || "未提供中文說明",
+      name_zh: positionNameMap.get(symbol) || coreNameMap.get(symbol) || "",
+      name:
+        positionNameMap.get(symbol) ||
+        coreNameMap.get(symbol) ||
+        "未提供中文說明",
       selected: coreSet.has(symbol),
     }));
     if (holdings.value.length === 0) {
@@ -187,7 +198,7 @@ const saveCoreHoldings = async () => {
     const response = await fetch(url, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ symbols: selectedCoreSymbols.value }),
+      body: JSON.stringify({ items: selectedCoreItems.value }),
     });
     if (!response.ok) {
       throw new Error(`portfolio-service core_holdings ${response.status}`);
@@ -308,6 +319,7 @@ onMounted(fetchAll);
         <button class="refresh" type="button" @click="fetchAll" :disabled="newsLoading || decisionLoading">
           {{ newsLoading || decisionLoading ? "讀取中..." : "重新整理" }}
         </button>
+        <span class="action-note">重新載入新聞、持股、名稱映射與決策包</span>
         <p class="timestamp" v-if="lastUpdated">更新時間：{{ lastUpdated }}</p>
       </div>
     </header>
@@ -418,6 +430,7 @@ onMounted(fetchAll);
         <button class="refresh" type="button" @click="syncPortfolio" :disabled="holdingsSyncing">
           {{ holdingsSyncing ? "同步中..." : "同步交易" }}
         </button>
+        <span class="action-note">從交易來源匯入並補齊 name_zh</span>
         <button
           class="refresh"
           type="button"
@@ -426,6 +439,7 @@ onMounted(fetchAll);
         >
           {{ holdingsRebuilding ? "重建中..." : "重建持股" }}
         </button>
+        <span class="action-note">依 trades 重新計算 positions</span>
         <button
           class="refresh"
           type="button"
@@ -434,6 +448,7 @@ onMounted(fetchAll);
         >
           {{ holdingsSaving ? "儲存中..." : "儲存核心持股" }}
         </button>
+        <span class="action-note">把勾選清單寫入 core_holdings</span>
         <p class="timestamp" v-if="holdingsSavedAt">已儲存：{{ holdingsSavedAt }}</p>
       </div>
       </div>
@@ -469,9 +484,11 @@ onMounted(fetchAll);
           <button class="refresh" type="button" @click="resolveSymbolMapping" :disabled="mappingResolving">
             {{ mappingResolving ? "查詢中..." : "自動查詢" }}
           </button>
+          <span class="action-note">用 symbol 查詢中文名稱</span>
           <button class="refresh" type="button" @click="saveSymbolMapping" :disabled="mappingSaving">
             {{ mappingSaving ? "儲存中..." : "儲存映射" }}
           </button>
+          <span class="action-note">手動覆寫或補齊名稱</span>
           <p class="timestamp" v-if="mappingsUpdatedAt">已更新：{{ mappingsUpdatedAt }}</p>
         </div>
       </div>
@@ -964,6 +981,11 @@ strong {
   align-items: center;
   gap: 1rem;
   flex-wrap: wrap;
+}
+
+.action-note {
+  font-size: 0.75rem;
+  color: #94a3b8;
 }
 
 .meta {
