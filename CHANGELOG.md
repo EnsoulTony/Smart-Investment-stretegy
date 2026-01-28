@@ -8,6 +8,12 @@
   - 前端改透過 api-gateway 取得 news signals，符合微服務邊界
 - **verify_sprint_3.sh**：新增 news-service migration 步驟與 DB 落地檢查
 
+## [0.2.7] - 2026-01-28（Sprint 3：news_signals 去重/上限/權重規則）
+- **news_signals 落地規則**
+  - 新增 published_date/weight 欄位與去重 constraint（source+title+date）
+  - 每來源每日最多 30 筆（依 EDS 權重排序）
+  - EDS 權重寫死於 news-service persistence
+
 ## [0.2.6] - 2026-01-28（Sprint 3：War Room UI + 可配置化前端 API）
 - **Frontend War Room**
   - 新增戰情室首頁顯示 news-service N1/N3 signals（含 triggers/symbols/themes）

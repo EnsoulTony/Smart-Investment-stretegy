@@ -75,6 +75,7 @@ Smart-Investment-Strategy 採微服務架構，分為前端、API Gateway、四�
   - 透過 HTTP 向 `portfolio-service` 取得 `core_holdings`（核心持股清單），避免寫死 holdings 與重複邏輯。
   - Sprint 3 先提供 deterministic stub provider，避免外部資料源造成測試漂移（後續可替換真 provider）。
   - signals 會落地到 `public.news_signals`（供後續分析與 UI 查詢）。
+  - 落地規則：同來源同標題同日期去重；每來源每日最多 30 筆（依 EDS 權重排序）。
 - **research-service**：
   - 抓取國泰 PDF、允許手動匯入券商報告，產出 `research_signals`。
 - **Postgres**：

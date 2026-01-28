@@ -1250,6 +1250,10 @@ docker compose run --rm -e DATABASE_URL=x valuation-service python -c "from app.
 - news-service
   - `GET /news/signals?user_id=tony&as_of=YYYY-MM-DD`：回傳 N1/N3 news signals（固定規則、deterministic stub）
   - 產出 signals 會落地到 `public.news_signals`（DB 持久化，便於後續分析）
+  - 去重與上限規則（固定）：
+    - 同一來源 + 同一標題 + 同一日期只保留一筆
+    - 每個來源每天最多 30 筆（依權重排序取前 30）
+  - EDS 權重（固定）：N1=2、N3=1、symbols 非空 +1、themes 命中關鍵宏觀類別 +1、triggers 非空 +1
 - api-gateway
   - `GET /news/signals` 轉發至 news-service（戰情室前端使用）
 

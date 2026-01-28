@@ -567,7 +567,14 @@ GET /news/signals?user_id=user-uuid&as_of=YYYY-MM-DD
 
 **落地說明（Sprint 3）**
 - news-service 每次產出 signals 會將 item 落地到 `public.news_signals` 表
-- 主要欄位：`title`, `published_at`, `source_url`, `payload`（完整 item JSON）
+- 主要欄位：`title`, `published_at`, `published_date`, `source`, `source_url`, `weight`, `payload`（完整 item JSON）
+- **去重規則**：同一來源 + 同一標題 + 同一日期只保留一筆
+- **每日上限**：每個來源每天最多 30 筆（依權重排序取前 30）
+- **EDS 權重（固定規則）**：
+  - N1 = 2；N3 = 1
+  - +1：symbols 非空
+  - +1：themes 命中 `rates_central_bank` / `credit_event` / `war_energy_supply` / `tariff_sanctions` / `ai_power`
+  - +1：falsifiable_triggers 非空
 
 ## 5. research-service
 

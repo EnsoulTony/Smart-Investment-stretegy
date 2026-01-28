@@ -200,6 +200,35 @@ fi
 echo "  ✓ news_signals has >= 1 rows (count=${ROW_COUNT})"
 
 echo
+echo "[4.6/7] Verifying news_signals DB rules..."
+# Unique constraint rule check: no duplicate (source,title,published_date)
+DUP_COUNT="$(./dc.sh exec -T "${POSTGRES_SVC}" psql -U "${DB_USER}" -d "${DB_NAME}" -tAc "SELECT COUNT(*) FROM (SELECT source, title, published_date, COUNT(*) AS c FROM public.news_signals GROUP BY source, title, published_date HAVING COUNT(*) > 1) t;")"
+DUP_COUNT="$(echo "${DUP_COUNT}" | tr -d '[:space:]')"
+if [[ -z "${DUP_COUNT}" || "${DUP_COUNT}" -ne 0 ]]; then
+  echo "❌ news_signals has duplicate (source,title,published_date) rows (duplicates=${DUP_COUNT:-unknown})"
+  exit 1
+fi
+echo "  ✓ No duplicate (source,title,published_date) rows"
+
+# Per source per day cap check (<=30)
+OVER_LIMIT="$(./dc.sh exec -T "${POSTGRES_SVC}" psql -U "${DB_USER}" -d "${DB_NAME}" -tAc "SELECT COUNT(*) FROM (SELECT source, published_date, COUNT(*) AS c FROM public.news_signals GROUP BY source, published_date HAVING COUNT(*) > 30) t;")"
+OVER_LIMIT="$(echo "${OVER_LIMIT}" | tr -d '[:space:]')"
+if [[ -z "${OVER_LIMIT}" || "${OVER_LIMIT}" -ne 0 ]]; then
+  echo "❌ news_signals exceeds per-source daily cap (groups over 30 = ${OVER_LIMIT:-unknown})"
+  exit 1
+fi
+echo "  ✓ Per-source daily cap enforced (<= 30)"
+
+# Weight column presence check (non-null)
+NULL_WEIGHT="$(./dc.sh exec -T "${POSTGRES_SVC}" psql -U "${DB_USER}" -d "${DB_NAME}" -tAc "SELECT COUNT(*) FROM public.news_signals WHERE weight IS NULL;")"
+NULL_WEIGHT="$(echo "${NULL_WEIGHT}" | tr -d '[:space:]')"
+if [[ -z "${NULL_WEIGHT}" || "${NULL_WEIGHT}" -ne 0 ]]; then
+  echo "❌ news_signals has NULL weight rows (count=${NULL_WEIGHT:-unknown})"
+  exit 1
+fi
+echo "  ✓ weight populated for all rows"
+
+echo
 echo "[5/7] Running pytest in news-service container..."
 ./dc.sh exec -T news-service pytest -q
 echo "  ✓ news-service pytest PASSED"
