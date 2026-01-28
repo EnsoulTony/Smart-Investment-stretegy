@@ -45,25 +45,40 @@ FACTOR_GROUPS: Dict[str, List[str]] = {
 RATE_KEYWORDS = [
     "升息", "降息", "利率決議", "FOMC", "Fed", "ECB", "BOJ",
     "通膨", "CPI", "PCE", "殖利率", "10年期",
+    "rate hike", "rate cut", "interest rate decision", "rate decision",
+    "central bank", "hawkish", "dovish",
+    "inflation", "yield", "treasury", "10-year", "10 year", "bond yield",
 ]
 TARIFF_KEYWORDS = [
     "關稅", "制裁", "出口管制", "禁令", "實體清單", "貿易戰",
+    "tariff", "sanction", "export control", "ban", "entity list", "trade war",
+    "trade restriction", "import ban", "export ban",
 ]
 WAR_ENERGY_KEYWORDS = [
     "戰爭", "空襲", "封鎖", "油價飆升", "供應中斷", "OPEC",
+    "war", "airstrike", "blockade", "oil surge", "supply disruption", "energy shock",
+    "missile strike", "conflict", "geopolitical risk", "supply shock",
 ]
 CREDIT_KEYWORDS = [
     "倒閉", "違約", "清算", "挤兑", "信用危機", "流動性危機", "銀行危機",
+    "default", "bankruptcy", "liquidation", "bank run", "credit crisis",
+    "liquidity crisis", "banking crisis", "credit event", "insolvency",
 ]
 AI_POWER_PRIMARY = [
     "核能", "電網", "供電", "PPA", "GW", "資料中心", "AI超級電腦", "電力需求", "電價",
+    "nuclear", "grid", "power supply", "data center", "supercomputer",
+    "power demand", "electricity price", "power price",
 ]
 AI_POWER_SECONDARY = [
     "訂單", "供電", "合約", "容量", "電網",
+    "order", "contract", "capacity", "grid", "offtake", "ppa",
 ]
 
 MARKET_MECH_KEYWORDS = [
     "大跌", "暴跌", "飆升", "創新高", "創新低", "跳空", "熔斷", "reprice", "pricing in",
+    "selloff", "plunge", "surge", "record high", "record low", "gap",
+    "circuit breaker", "volatility spike", "risk-off", "risk on",
+    "market rout", "meltdown", "flash crash",
 ]
 
 HUGE_SCALE_REGEX = re.compile(r"\b(\d+(\.\d+)?)(\s?)(GW|兆|十億|Billion|bn)\b", re.IGNORECASE)
