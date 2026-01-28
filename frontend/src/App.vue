@@ -30,6 +30,7 @@ const decisionPackage = ref(null);
 const decisionError = ref("");
 const decisionLoading = ref(false);
 const holdings = ref([]);
+const positions = ref([]);
 const holdingsError = ref("");
 const holdingsLoading = ref(false);
 const holdingsSaving = ref(false);
@@ -126,6 +127,7 @@ const fetchHoldings = async () => {
     }
     const positionsData = await positionsResp.json();
     const coreData = await coreResp.json();
+    positions.value = positionsData.items || [];
     const positionSymbols = (positionsData.items || []).map((item) => item.symbol);
     const positionNameMap = new Map(
       (positionsData.items || []).map((item) => [item.symbol, item.name_zh]),
@@ -456,6 +458,38 @@ onMounted(fetchAll);
 
     <section class="panel">
       <div class="panel-header">
+        <h2>持股明細</h2>
+        <span class="badge">portfolio-service</span>
+      </div>
+
+      <div v-if="holdingsLoading" class="empty">讀取中...</div>
+      <div v-else-if="positions.length === 0" class="empty">尚無持股資料</div>
+      <div v-else class="positions-table">
+        <div class="positions-row positions-header">
+          <span>代碼</span>
+          <span>名稱</span>
+          <span>幣別</span>
+          <span class="number">數量</span>
+          <span class="number">均價</span>
+          <span class="number">成本</span>
+          <span class="number">已實現損益</span>
+        </div>
+        <div v-for="pos in positions" :key="pos.symbol" class="positions-row">
+          <span class="symbol">{{ pos.symbol }}</span>
+          <span>{{ pos.name_zh || '-' }}</span>
+          <span>{{ pos.asset_ccy }}</span>
+          <span class="number">{{ Number(pos.quantity).toLocaleString('zh-TW', { maximumFractionDigits: 4 }) }}</span>
+          <span class="number">{{ Number(pos.avg_cost).toLocaleString('zh-TW', { minimumFractionDigits: 2, maximumFractionDigits: 4 }) }}</span>
+          <span class="number">{{ Number(pos.cost_basis).toLocaleString('zh-TW', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) }}</span>
+          <span class="number" :class="{ positive: Number(pos.realized_pnl) > 0, negative: Number(pos.realized_pnl) < 0 }">
+            {{ Number(pos.realized_pnl).toLocaleString('zh-TW', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) }}
+          </span>
+        </div>
+      </div>
+    </section>
+
+    <section class="panel">
+      <div class="panel-header">
         <h2>資產中文名稱維護</h2>
         <span class="badge">portfolio-service</span>
       </div>
@@ -727,6 +761,46 @@ h1 {
 .mapping-header {
   font-weight: 600;
   color: #93c5fd;
+}
+
+.positions-table {
+  display: grid;
+  gap: 0.5rem;
+  overflow-x: auto;
+}
+
+.positions-row {
+  display: grid;
+  grid-template-columns: 1fr 1.5fr 0.6fr 1fr 1fr 1.2fr 1.2fr;
+  gap: 0.5rem;
+  padding: 0.6rem 0.75rem;
+  background: rgba(15, 23, 42, 0.6);
+  border-radius: 10px;
+  border: 1px solid rgba(148, 163, 184, 0.2);
+  min-width: 700px;
+}
+
+.positions-header {
+  font-weight: 600;
+  color: #93c5fd;
+}
+
+.positions-row .symbol {
+  font-weight: 600;
+  color: #93c5fd;
+}
+
+.positions-row .number {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.positions-row .positive {
+  color: #4ade80;
+}
+
+.positions-row .negative {
+  color: #f87171;
 }
 
 .panel {
