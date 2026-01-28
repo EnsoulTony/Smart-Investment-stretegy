@@ -12,6 +12,8 @@ if str(ROOT) not in sys.path:
 from app.db import Base
 import os
 
+os.environ.setdefault("SYMBOL_NAME_PROVIDER", "disabled")
+
 
 @pytest.fixture(scope="function")
 def db_engine():

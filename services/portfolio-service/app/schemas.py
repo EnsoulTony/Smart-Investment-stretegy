@@ -23,7 +23,7 @@ class TradeRecord(BaseModel):
     fee: Decimal = Field(default=Decimal("0"), ge=0, description="手續費，必須 >= 0")
     trade_date: datetime = Field(..., description="交易日期時間")
     broker: str = Field(..., min_length=1, description="券商名稱（例如：IB、Firstrade）")
-    is_core: bool = Field(default=False, description="是否核心持股（從表單勾選）")
+    name_zh: Optional[str] = Field(default=None, description="資產中文名稱（由系統查詢）")
     
     @field_validator("side")
     @classmethod
@@ -120,19 +120,6 @@ class TradeRecord(BaseModel):
         
         raise ValueError(f"trade_date 必須是字串或 datetime，收到：{type(v)}")
 
-    @field_validator("is_core", mode="before")
-    @classmethod
-    def validate_is_core(cls, v):
-        """解析 checkbox / 字串布林。"""
-        if isinstance(v, bool):
-            return v
-        if v is None:
-            return False
-        if isinstance(v, (int, float)):
-            return bool(v)
-        val = str(v).strip().lower()
-        return val in {"1", "true", "yes", "y", "t", "checked", "on", "☑", "v"}
-
 
 class CoreHolding(BaseModel):
     """核心持股設定。"""
@@ -184,6 +171,7 @@ class PositionItem(BaseModel):
     avg_cost: Decimal = Field(..., description="均價（會計成本）")
     realized_pnl: Decimal = Field(..., description="已實現損益")
     cost_basis: Decimal = Field(..., description="成本基礎（quantity * avg_cost）")
+    name_zh: Optional[str] = Field(default=None, description="資產中文名稱（交易來源）")
     
     model_config = ConfigDict(from_attributes=True)
 

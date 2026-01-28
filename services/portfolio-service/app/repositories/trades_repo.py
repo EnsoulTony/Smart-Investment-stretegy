@@ -75,7 +75,7 @@ class TradesRepository:
                 "fee": trade_record.fee,
                 "trade_date": trade_date,
                 "broker": trade_record.broker,
-                "is_core": trade_record.is_core,
+                "name_zh": trade_record.name_zh,
                 "source_hash": source_hash,
             })
         

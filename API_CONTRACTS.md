@@ -26,6 +26,15 @@
 }
 ```
 
+### `GET /portfolio/positions`
+轉發至 portfolio-service 的持倉查詢端點。
+
+### `GET /portfolio/core_holdings`
+轉發至 portfolio-service 的核心持股查詢端點。
+
+### `POST /portfolio/core_holdings`
+轉發至 portfolio-service 的核心持股設定端點。
+
 ### `GET /news/signals`
 轉發至 news-service 的 `GET /news/signals` 端點（戰情室 UI 入口）。
 （前端統一透過 api-gateway 呼叫，避免跨域與服務直連）
@@ -45,7 +54,7 @@
       "quantity": 100,
       "avg_cost": 388.5,
       "market_value": 42000,
-      "is_core": true
+      "name_zh": "納斯達克 100 ETF"
     }
   ],
   "news_signals": [...],
@@ -141,17 +150,18 @@ GET /portfolio/positions?user_id=user-uuid
   "user_id": "user-uuid",
   "asof": null,
   "items": [
-    {
-      "symbol": "QQQ",
-      "asset_ccy": "USD",
-      "quantity": 100,
-      "avg_cost": 388.5,
-      "realized_pnl": 0,
-      "cost_basis": 38850.0
+        {
+          "symbol": "QQQ",
+          "asset_ccy": "USD",
+          "quantity": 100,
+          "avg_cost": 388.5,
+          "realized_pnl": 0,
+          "cost_basis": 38850.0,
+          "name_zh": "納斯達克 100 ETF"
+        }
+      ],
+      "next_cursor": null
     }
-  ],
-  "next_cursor": null
-}
 ```
 
 **Error 404 Not Found**
@@ -242,6 +252,9 @@ POST /portfolio/core_holdings?user_id=user-uuid
 }
 ```
 
+#### `POST /portfolio/core_holdings/rebuild`（Deprecated）
+trade is_core 欄位已移除，本端點僅回傳提示訊息，請改用 `/portfolio/core_holdings` 由 UI 設定。
+
 ### 資料庫 Schema
 
 #### `trades` 表（寫入 Postgres）
@@ -257,7 +270,7 @@ POST /portfolio/core_holdings?user_id=user-uuid
 | fee | NUMERIC | 手續費 |
 | trade_date | TIMESTAMP | 交易日期時間 |
 | broker | TEXT | 券商 |
-| is_core | BOOLEAN | 是否核心持股（預設 false；由 UI/設定端點管理） |
+| name_zh | TEXT | 資產中文名稱（由系統查詢寫入） |
 | source_row_id | TEXT | 原始列識別（可空） |
 | source_hash | TEXT | 去重 hash |
 | created_at | TIMESTAMP | 建立時間 |
@@ -282,6 +295,7 @@ POST /portfolio/core_holdings?user_id=user-uuid
 | avg_cost | NUMERIC | 平均成本 |
 | realized_pnl | NUMERIC | 已實現損益 |
 | u_pnl | NUMERIC | 未實現損益（帳務層固定為 0） |
+| name_zh | TEXT | 資產中文名稱 |
 | last_updated_at | TIMESTAMP | 最後更新時間 |
 
 ## 3. valuation-service（Sprint 1-4.B）
@@ -647,4 +661,4 @@ GET /news/signals?user_id=user-uuid&as_of=YYYY-MM-DD
 **變更摘要：**
 - 新增 `GET /news/signals`（N1/N3 可驗收規則、items contract、triggers schema）
 - 新增 `GET/POST /portfolio/core_holdings`（核心持股清單由本地 DB 管理）
-- portfolio trades schema 新增 `is_core` 欄位
+- portfolio trades schema 新增 `name_zh` 欄位（中文名稱）

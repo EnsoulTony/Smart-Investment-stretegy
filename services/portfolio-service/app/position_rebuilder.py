@@ -99,6 +99,7 @@ class PositionRebuilder:
         try:
             trades_orm = list_trades_for_user(self.session, user_id)
             grouped_trades = defaultdict(list)
+            name_by_symbol = {}
 
             for trade_orm in trades_orm:
                 # DB 中賣出交易 quantity 可能為負數，統一轉為正數
@@ -112,9 +113,11 @@ class PositionRebuilder:
                     price=trade_orm.price,
                     fee=trade_orm.fee,
                     trade_date=trade_orm.trade_date,
-                    broker=trade_orm.broker
+                    broker=trade_orm.broker,
+                    name_zh=getattr(trade_orm, "name_zh", None),
                 )
                 grouped_trades[(trade_record.symbol, trade_record.asset_ccy)].append(trade_record)
+                name_by_symbol[(trade_record.symbol, trade_record.asset_ccy)] = trade_record.name_zh
 
             # Fail Fast 驗證
             logger.info("開始 Fail Fast 驗證，user_id=%s, symbols_count=%d", user_id, len(grouped_trades))
@@ -181,6 +184,7 @@ class PositionRebuilder:
                         "avg_cost": state.avg_cost,
                         "realized_pnl": state.realized_pnl,
                         "u_pnl": Decimal("0"),
+                        "name_zh": name_by_symbol.get((symbol, asset_ccy)),
                         "last_updated_at": datetime.now(timezone.utc)
                     })
 
@@ -431,4 +435,3 @@ def preview_rebuild(user_id: str, db: Session) -> Dict:
     except Exception:
         logger.exception("預覽重算失敗，user_id=%s", user_id)
         raise
-

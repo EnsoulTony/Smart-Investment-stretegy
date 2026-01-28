@@ -283,7 +283,7 @@ def test_positions_api_no_valuation_logic():
 def test_positions_api_response_schema():
     """確認 PositionItem schema 只有帳務欄位
     
-    允許：symbol, asset_ccy, quantity, avg_cost, realized_pnl, cost_basis
+    允許：symbol, asset_ccy, quantity, avg_cost, realized_pnl, cost_basis, name_zh
     禁止：market_value, unrealized_pnl, fx_rate, valuation_ccy
     """
     schemas_path = Path(__file__).parent.parent / "app" / "schemas.py"
@@ -318,6 +318,6 @@ def test_positions_api_response_schema():
         f"❌ 違反 Sprint 1-4.B 鐵律：PositionItem 不應有估值欄位！\n"
         f"發現違規：\n" + "\n".join(f"  - {v}" for v in violations) + "\n"
         f"帳務層 response schema 只包含：\n"
-        f"  symbol, asset_ccy, quantity, avg_cost, realized_pnl, cost_basis\n"
+        f"  symbol, asset_ccy, quantity, avg_cost, realized_pnl, cost_basis, name_zh\n"
         f"估值欄位應在估值服務的專屬 schema。"
     )

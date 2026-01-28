@@ -165,3 +165,9 @@ radar-service/app/strategy_engine/
 - 新增 Strategy Engine 架構說明
 - 新增層級邊界與 Guardrails 章節
 - 明確 Sprint 1 guardrails 不得破壞
+
+---
+
+## 資料庫清單
+
+完整資料表與欄位定義請見 `docs/database_schema.md`。

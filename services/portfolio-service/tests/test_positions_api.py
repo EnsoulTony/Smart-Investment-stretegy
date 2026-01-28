@@ -62,9 +62,10 @@ def test_get_positions_success():
     assert len(data["items"]) == 2
     assert data["next_cursor"] is None
     
-    # 驗證第一筆持倉
-    item1 = data["items"][0]
-    assert item1["symbol"] == "TSLA"
+    # 驗證持倉內容（不依賴順序）
+    items_by_symbol = {item["symbol"]: item for item in data["items"]}
+    assert set(items_by_symbol.keys()) == {"TSLA", "NVDA"}
+    item1 = items_by_symbol["TSLA"]
     assert item1["asset_ccy"] == "USD"
     assert item1["quantity"] == "100"
     assert item1["avg_cost"] == "250.00"

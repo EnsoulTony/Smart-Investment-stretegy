@@ -11,6 +11,7 @@ from typing import List, Dict, Tuple, Optional
 from decimal import Decimal
 from datetime import timezone
 from pydantic import ValidationError
+import httpx
 
 from app.schemas import TradeRecord
 
@@ -85,8 +86,11 @@ class TradeNormalizer:
             "fee": os.getenv("SHEET_COL_FEE", "fee"),
             "trade_date": os.getenv("SHEET_COL_TRADE_DATE", "trade_date"),
             "broker": os.getenv("SHEET_COL_BROKER", "broker"),
-            "is_core": os.getenv("SHEET_COL_IS_CORE", "is_core"),
+            "name_zh": os.getenv("SHEET_COL_NAME_ZH", "name_zh"),
         }
+        self.name_cache: Dict[str, str] = {}
+        self.name_provider = os.getenv("SYMBOL_NAME_PROVIDER", "yahoo").lower()
+        self.name_timeout = float(os.getenv("SYMBOL_NAME_TIMEOUT", "3.0"))
         
         # 台股 ETF 白名單（用於判斷要補到幾碼）
         self.tw_etf_prefixes = {
@@ -216,9 +220,8 @@ class TradeNormalizer:
                 elif standard_col in row_dict:
                     # Fallback: 直接使用 canonical key（例如測試提供的 mock dict）
                     mapped_data[standard_col] = row_dict[standard_col]
-                elif standard_col == "is_core":
-                    # 可選欄位，預設 False
-                    mapped_data[standard_col] = False
+                elif standard_col == "name_zh":
+                    mapped_data[standard_col] = ""
                 else:
                     return None, f"缺少必要欄位：{sheet_col}（或 {standard_col}）"
             
@@ -231,6 +234,10 @@ class TradeNormalizer:
                     )
                 except Exception as e:
                     return None, f"symbol 正規化失敗：{str(e)}"
+
+            # 由網路查詢中文名稱（若未提供）
+            if not mapped_data.get("name_zh"):
+                mapped_data["name_zh"] = self.resolve_name_zh(mapped_data.get("symbol", ""))
             
             # trade_date 防呆：提前檢查是否為明顯錯誤的值
             if "trade_date" in mapped_data:
@@ -301,7 +308,7 @@ class TradeNormalizer:
                 raw_data_snippet = {}
                 key_fields = [
                     "user_id", "symbol", "asset_ccy", "side", "quantity",
-                    "price", "fee", "trade_date", "broker", "is_core",
+                    "price", "fee", "trade_date", "broker", "name_zh",
                 ]
                 for field in key_fields:
                     sheet_col = self.column_mapping.get(field)
@@ -378,6 +385,36 @@ class TradeNormalizer:
         # 計算 SHA-256 hash
         hash_obj = hashlib.sha256(canonical.encode("utf-8"))
         return hash_obj.hexdigest()
+
+    def resolve_name_zh(self, symbol: str) -> str:
+        """從網路查詢標的中文名稱（允許 fallback 空字串）。"""
+        symbol = safe_str(symbol)
+        if not symbol:
+            return ""
+        if symbol in self.name_cache:
+            return self.name_cache[symbol]
+        if self.name_provider in {"disabled", "off", "none"}:
+            return ""
+
+        name = ""
+        try:
+            params = {"q": symbol, "quotesCount": 1, "newsCount": 0}
+            resp = httpx.get(
+                "https://query2.finance.yahoo.com/v1/finance/search",
+                params=params,
+                timeout=self.name_timeout,
+            )
+            resp.raise_for_status()
+            payload = resp.json()
+            quotes = payload.get("quotes") or []
+            if quotes:
+                quote = quotes[0]
+                name = quote.get("shortname") or quote.get("longname") or ""
+        except Exception:
+            name = ""
+
+        self.name_cache[symbol] = name
+        return name
     
     @staticmethod
     def get_canonical_string(trade: TradeRecord) -> str:

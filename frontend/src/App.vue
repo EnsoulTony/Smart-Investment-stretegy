@@ -29,6 +29,14 @@ const newsLoading = ref(false);
 const decisionPackage = ref(null);
 const decisionError = ref("");
 const decisionLoading = ref(false);
+const holdings = ref([]);
+const holdingsError = ref("");
+const holdingsLoading = ref(false);
+const holdingsSaving = ref(false);
+const holdingsSyncing = ref(false);
+const holdingsRebuilding = ref(false);
+const holdingsSavedAt = ref("");
+const holdingsHint = ref("");
 const lastUpdated = ref("");
 
 const n1Items = computed(() => newsItems.value.filter((item) => item.tier === "N1"));
@@ -42,6 +50,11 @@ const decisionSummary = computed(() => {
   const score = decisionPackage.value.evidence?.news_context?.score_impact?.risk_off_score_added ?? 0;
   return `N1=${n1}、N3=${n3}，新聞風險分數影響 ${score}，融合後模式為 ${decisionPackage.value.mode}，決策為 ${decisionPackage.value.decision}。`;
 });
+
+const selectedCoreSymbols = computed(() =>
+  holdings.value.filter((item) => item.selected).map((item) => item.symbol),
+);
+const holdingsEmpty = computed(() => holdings.value.length === 0);
 
 const fetchNewsSignals = async () => {
   newsLoading.value = true;
@@ -79,8 +92,106 @@ const fetchDecisionPackage = async () => {
   }
 };
 
+const fetchHoldings = async () => {
+  holdingsLoading.value = true;
+  holdingsError.value = "";
+  holdingsHint.value = "";
+  try {
+    const positionsUrl = `${API_BASE_URL}/portfolio/positions?user_id=${USER_ID}`;
+    const coreUrl = `${API_BASE_URL}/portfolio/core_holdings?user_id=${USER_ID}`;
+    const [positionsResp, coreResp] = await Promise.all([
+      fetch(positionsUrl),
+      fetch(coreUrl),
+    ]);
+    if (!positionsResp.ok) {
+      throw new Error(`portfolio-service positions ${positionsResp.status}`);
+    }
+    if (!coreResp.ok) {
+      throw new Error(`portfolio-service core_holdings ${coreResp.status}`);
+    }
+    const positionsData = await positionsResp.json();
+    const coreData = await coreResp.json();
+    const positionSymbols = (positionsData.items || []).map((item) => item.symbol);
+    const positionNameMap = new Map(
+      (positionsData.items || []).map((item) => [item.symbol, item.name_zh]),
+    );
+    const coreSymbols = coreData.symbols || [];
+    const allSymbols = Array.from(new Set([...positionSymbols, ...coreSymbols])).sort();
+    const coreSet = new Set(coreSymbols);
+    holdings.value = allSymbols.map((symbol) => ({
+      symbol,
+      name: positionNameMap.get(symbol) || "未提供中文說明",
+      selected: coreSet.has(symbol),
+    }));
+    if (holdings.value.length === 0) {
+      holdingsHint.value = "目前尚未同步/重建持股，請先按下「同步」與「重建」取得清單。";
+    }
+  } catch (err) {
+    holdingsError.value = err?.message || "api-gateway 連線失敗";
+  } finally {
+    holdingsLoading.value = false;
+  }
+};
+
+const syncPortfolio = async () => {
+  holdingsSyncing.value = true;
+  holdingsError.value = "";
+  holdingsHint.value = "";
+  try {
+    const url = `${API_BASE_URL}/portfolio/sync`;
+    const response = await fetch(url, { method: "POST" });
+    if (!response.ok) {
+      throw new Error(`portfolio-service sync ${response.status}`);
+    }
+  } catch (err) {
+    holdingsError.value = err?.message || "api-gateway 連線失敗";
+  } finally {
+    holdingsSyncing.value = false;
+  }
+};
+
+const rebuildPositions = async () => {
+  holdingsRebuilding.value = true;
+  holdingsError.value = "";
+  holdingsHint.value = "";
+  try {
+    const url = `${API_BASE_URL}/portfolio/rebuild_positions?user_id=${USER_ID}&require_trades=true`;
+    const response = await fetch(url, { method: "POST" });
+    if (!response.ok) {
+      throw new Error(`portfolio-service rebuild_positions ${response.status}`);
+    }
+    await fetchHoldings();
+  } catch (err) {
+    holdingsError.value = err?.message || "api-gateway 連線失敗";
+  } finally {
+    holdingsRebuilding.value = false;
+  }
+};
+
+const saveCoreHoldings = async () => {
+  holdingsSaving.value = true;
+  holdingsError.value = "";
+  holdingsHint.value = "";
+  try {
+    const url = `${API_BASE_URL}/portfolio/core_holdings?user_id=${USER_ID}`;
+    const response = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ symbols: selectedCoreSymbols.value }),
+    });
+    if (!response.ok) {
+      throw new Error(`portfolio-service core_holdings ${response.status}`);
+    }
+    holdingsSavedAt.value = new Date().toLocaleString("zh-TW");
+  } catch (err) {
+    holdingsError.value = err?.message || "api-gateway 連線失敗";
+  } finally {
+    holdingsSaving.value = false;
+  }
+};
+
 const fetchAll = async () => {
-  await Promise.all([fetchNewsSignals(), fetchDecisionPackage()]);
+  await Promise.all([fetchNewsSignals(), fetchDecisionPackage(), fetchHoldings()]);
 };
 
 onMounted(fetchAll);
@@ -184,6 +295,52 @@ onMounted(fetchAll);
             </div>
           </article>
         </div>
+      </div>
+    </section>
+
+    <section class="panel">
+      <div class="panel-header">
+        <h2>編輯核心持股</h2>
+        <span class="badge">portfolio-service</span>
+      </div>
+
+      <div v-if="holdingsError" class="error">
+        {{ holdingsError }}
+      </div>
+
+      <div v-else class="holdings-grid">
+        <div v-if="holdingsLoading" class="empty">讀取中...</div>
+        <div v-else-if="holdings.length === 0" class="empty">尚無持股清單</div>
+      <div v-else class="holdings-list">
+        <label v-for="item in holdings" :key="item.symbol" class="holding-item">
+          <input type="checkbox" v-model="item.selected" />
+          <span class="holding-symbol">{{ item.symbol }}</span>
+          <span class="holding-name">{{ item.name }}</span>
+        </label>
+      </div>
+      <p v-if="holdingsHint" class="hint">{{ holdingsHint }}</p>
+      <div class="holdings-actions">
+        <button class="refresh" type="button" @click="syncPortfolio" :disabled="holdingsSyncing">
+          {{ holdingsSyncing ? "同步中..." : "同步交易" }}
+        </button>
+        <button
+          class="refresh"
+          type="button"
+          @click="rebuildPositions"
+          :disabled="holdingsRebuilding"
+        >
+          {{ holdingsRebuilding ? "重建中..." : "重建持股" }}
+        </button>
+        <button
+          class="refresh"
+          type="button"
+          @click="saveCoreHoldings"
+          :disabled="holdingsSaving || holdingsLoading || holdingsEmpty"
+        >
+          {{ holdingsSaving ? "儲存中..." : "儲存核心持股" }}
+        </button>
+        <p class="timestamp" v-if="holdingsSavedAt">已儲存：{{ holdingsSavedAt }}</p>
+      </div>
       </div>
     </section>
 
@@ -573,6 +730,48 @@ strong {
 
 .news-link:hover {
   text-decoration: underline;
+}
+
+.holdings-grid {
+  display: grid;
+  gap: 1rem;
+}
+
+.holdings-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 0.75rem;
+}
+
+.holding-item {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.6rem 0.8rem;
+  border-radius: 10px;
+  background: rgba(15, 23, 42, 0.85);
+  border: 1px solid rgba(148, 163, 184, 0.2);
+  font-size: 0.85rem;
+}
+
+.holding-item input {
+  accent-color: #22c55e;
+}
+
+.holding-symbol {
+  font-weight: 600;
+  color: #93c5fd;
+}
+
+.holding-name {
+  color: #cbd5f5;
+}
+
+.holdings-actions {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  flex-wrap: wrap;
 }
 
 .meta {

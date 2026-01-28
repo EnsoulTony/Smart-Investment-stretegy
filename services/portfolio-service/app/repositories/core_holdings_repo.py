@@ -1,4 +1,4 @@
-"""Repository for core_holdings settings (persisted from trades is_core flags)."""
+"""Repository for core_holdings settings (user-managed list)."""
 
 from typing import List, Tuple
 from sqlalchemy.orm import Session

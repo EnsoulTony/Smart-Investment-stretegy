@@ -87,6 +87,67 @@ async def proxy_portfolio_sync(request: Request) -> Any:
         )
 
 
+@app.post("/portfolio/rebuild_positions", tags=["portfolio"])
+async def proxy_portfolio_rebuild_positions(request: Request) -> Any:
+    """轉發重算持倉請求到 Portfolio Service。"""
+    target_url = f"{PORTFOLIO_SERVICE_URL}/portfolio/rebuild_positions"
+    try:
+        body = await request.body()
+        async with httpx.AsyncClient() as client:
+            response = await client.post(
+                target_url,
+                params=dict(request.query_params),
+                content=body,
+                headers=dict(request.headers),
+                timeout=30.0,
+            )
+        return Response(
+            content=response.content,
+            status_code=response.status_code,
+            headers=dict(response.headers),
+            media_type="application/json",
+        )
+    except httpx.RequestError as e:
+        raise HTTPException(
+            status_code=503,
+            detail=f"無法連線到 Portfolio Service: {str(e)}",
+        )
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"轉發請求時發生錯誤: {str(e)}",
+        )
+
+
+@app.get("/portfolio/rebuild_positions/preview", tags=["portfolio"])
+async def proxy_portfolio_rebuild_positions_preview(request: Request) -> Any:
+    """轉發重算預覽請求到 Portfolio Service。"""
+    target_url = f"{PORTFOLIO_SERVICE_URL}/portfolio/rebuild_positions/preview"
+    try:
+        async with httpx.AsyncClient() as client:
+            response = await client.get(
+                target_url,
+                params=dict(request.query_params),
+                timeout=10.0,
+            )
+        return Response(
+            content=response.content,
+            status_code=response.status_code,
+            headers=dict(response.headers),
+            media_type="application/json",
+        )
+    except httpx.RequestError as e:
+        raise HTTPException(
+            status_code=503,
+            detail=f"無法連線到 Portfolio Service: {str(e)}",
+        )
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"轉發請求時發生錯誤: {str(e)}",
+        )
+
+
 @app.get("/portfolio/health", tags=["portfolio"])
 async def proxy_portfolio_health() -> Any:
     """轉發健康檢查請求到 Portfolio Service。
@@ -126,6 +187,96 @@ async def proxy_portfolio_health() -> Any:
         raise HTTPException(
             status_code=500,
             detail=f"轉發請求時發生錯誤: {str(e)}"
+        )
+
+
+@app.get("/portfolio/positions", tags=["portfolio"])
+async def proxy_portfolio_positions(request: Request) -> Any:
+    """轉發持倉查詢請求到 Portfolio Service。"""
+    target_url = f"{PORTFOLIO_SERVICE_URL}/portfolio/positions"
+    try:
+        async with httpx.AsyncClient() as client:
+            response = await client.get(
+                target_url,
+                params=dict(request.query_params),
+                timeout=10.0,
+            )
+        return Response(
+            content=response.content,
+            status_code=response.status_code,
+            headers=dict(response.headers),
+            media_type="application/json",
+        )
+    except httpx.RequestError as e:
+        raise HTTPException(
+            status_code=503,
+            detail=f"無法連線到 Portfolio Service: {str(e)}",
+        )
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"轉發請求時發生錯誤: {str(e)}",
+        )
+
+
+@app.get("/portfolio/core_holdings", tags=["portfolio"])
+async def proxy_portfolio_core_holdings(request: Request) -> Any:
+    """轉發核心持股查詢請求到 Portfolio Service。"""
+    target_url = f"{PORTFOLIO_SERVICE_URL}/portfolio/core_holdings"
+    try:
+        async with httpx.AsyncClient() as client:
+            response = await client.get(
+                target_url,
+                params=dict(request.query_params),
+                timeout=10.0,
+            )
+        return Response(
+            content=response.content,
+            status_code=response.status_code,
+            headers=dict(response.headers),
+            media_type="application/json",
+        )
+    except httpx.RequestError as e:
+        raise HTTPException(
+            status_code=503,
+            detail=f"無法連線到 Portfolio Service: {str(e)}",
+        )
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"轉發請求時發生錯誤: {str(e)}",
+        )
+
+
+@app.post("/portfolio/core_holdings", tags=["portfolio"])
+async def proxy_portfolio_core_holdings_save(request: Request) -> Any:
+    """轉發核心持股寫入請求到 Portfolio Service。"""
+    target_url = f"{PORTFOLIO_SERVICE_URL}/portfolio/core_holdings"
+    try:
+        body = await request.body()
+        async with httpx.AsyncClient() as client:
+            response = await client.post(
+                target_url,
+                params=dict(request.query_params),
+                content=body,
+                headers=dict(request.headers),
+                timeout=10.0,
+            )
+        return Response(
+            content=response.content,
+            status_code=response.status_code,
+            headers=dict(response.headers),
+            media_type="application/json",
+        )
+    except httpx.RequestError as e:
+        raise HTTPException(
+            status_code=503,
+            detail=f"無法連線到 Portfolio Service: {str(e)}",
+        )
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"轉發請求時發生錯誤: {str(e)}",
         )
 
 

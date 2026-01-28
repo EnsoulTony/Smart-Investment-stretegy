@@ -525,15 +525,14 @@ def get_positions(
 @app.post("/portfolio/core_holdings/rebuild", tags=["portfolio"])
 def rebuild_core_holdings(
     user_id: str = Query(..., min_length=1, description="使用者 ID"),
-    service: CoreHoldingsService = Depends(get_core_holdings_service),
 ):
-    """從 trades 表的 is_core 標記重建 core_holdings。"""
-    rows_marked, rows_upserted = service.rebuild_core_holdings(user_id)
+    """已停用：trade is_core 欄位移除，請改用 /portfolio/core_holdings 設定。"""
     return {
-        "status": "ok",
+        "status": "deprecated",
         "user_id": user_id,
-        "rows_marked": rows_marked,
-        "rows_upserted": rows_upserted,
+        "rows_marked": 0,
+        "rows_upserted": 0,
+        "message": "trade is_core 欄位已移除，請使用 /portfolio/core_holdings 編輯核心持股",
     }
 
 

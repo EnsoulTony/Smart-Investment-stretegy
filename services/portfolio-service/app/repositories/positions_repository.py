@@ -45,7 +45,8 @@ def list_positions_for_user(
                 quantity=pos.quantity,
                 avg_cost=pos.avg_cost,
                 realized_pnl=pos.realized_pnl,
-                cost_basis=cost_basis
+                cost_basis=cost_basis,
+                name_zh=getattr(pos, "name_zh", None),
             )
         )
 

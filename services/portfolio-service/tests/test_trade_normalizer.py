@@ -16,6 +16,8 @@ from decimal import Decimal
 from app.trade_normalizer import TradeNormalizer
 from app.schemas import TradeRecord
 
+os.environ.setdefault("SYMBOL_NAME_PROVIDER", "disabled")
+
 
 class TestTradeNormalizer:
     """測試 TradeNormalizer 類別。"""

@@ -13,6 +13,16 @@
 - **api-gateway**
   - 新增 `/radar/decision` 與 `/radar/decisions/history` 轉發
 
+## [0.2.9] - 2026-01-28（核心持股編輯 + name_zh 同步）
+- **portfolio-service**
+  - trades 新增 `name_zh`（由網路查詢寫入）
+  - positions 新增 `name_zh`（由 trades 帶入）
+  - trades 移除 `is_core`
+  - /portfolio/core_holdings/rebuild 標記為 deprecated
+- **frontend**
+  - 新增「編輯核心持股」畫面（顯示 symbol + name_zh）
+  - 核心持股只透過 api-gateway 讀寫
+
 ## [0.2.5] - 2026-01-28（Sprint 3：news_signals 落地 + War Room 串接 api-gateway）
 - **news-service：news_signals 落地**
   - 新增 news-service Alembic migration，建立 `public.news_signals` 表

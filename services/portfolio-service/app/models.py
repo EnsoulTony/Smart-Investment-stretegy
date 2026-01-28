@@ -7,7 +7,7 @@
 """
 
 from datetime import datetime, timezone
-from sqlalchemy import Column, Integer, String, Numeric, DateTime, Text, UniqueConstraint, Index, Boolean
+from sqlalchemy import Column, Integer, String, Numeric, DateTime, Text, UniqueConstraint, Index
 import sqlalchemy as sa
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import synonym
@@ -34,7 +34,7 @@ class Trade(Base):
     fee = Column(Numeric, nullable=False, default=0)
     trade_date = Column(DateTime(timezone=True), nullable=False)
     broker = Column(Text, nullable=False)
-    is_core = Column(Boolean, nullable=False, server_default=sa.text('false'))
+    name_zh = Column(Text, nullable=True)
     source_row_id = Column(Text, nullable=True)
     source_hash = Column(Text, nullable=False, unique=True)
     created_at = Column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc))
@@ -60,6 +60,7 @@ class Position(Base):
     avg_cost = Column(Numeric, nullable=False)
     realized_pnl = Column(Numeric, nullable=False, default=0)
     u_pnl = Column(Numeric, nullable=False, default=0)
+    name_zh = Column(Text, nullable=True)
     last_updated_at = Column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc))
     
     __table_args__ = (

@@ -56,8 +56,9 @@ def test_positions_endpoint_success():
     assert data["next_cursor"] is None
     assert len(data["items"]) == 2
 
-    first = data["items"][0]
-    assert first["symbol"] == "TSLA"
+    items_by_symbol = {item["symbol"]: item for item in data["items"]}
+    assert set(items_by_symbol.keys()) == {"TSLA", "NVDA"}
+    first = items_by_symbol["TSLA"]
     assert first["asset_ccy"] == "USD"
     assert first["quantity"] == "100"
     assert first["avg_cost"] == "250.00"
