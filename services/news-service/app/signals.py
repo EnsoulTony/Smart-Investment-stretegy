@@ -10,6 +10,7 @@ import httpx
 
 PORTFOLIO_BASE_URL = os.getenv("PORTFOLIO_BASE_URL", "http://portfolio-service:8001")
 DEFAULT_CORE_HOLDINGS = ["TSLA", "CCJ", "OXY", "TSM", "URA"]
+DEFAULT_NEWS_PER_SOURCE = int(os.getenv("NEWS_SOURCE_LIMIT", "10"))
 
 
 def fetch_core_holdings(user_id: str) -> List[str]:
@@ -207,54 +208,121 @@ def build_triggers(text: str) -> List[dict]:
             "condition": "widen_above_threshold",
             "value": 0,
         })
+    if _match_market_mechanism(text):
+        triggers.append({
+            "type": "market",
+            "name": "volatility",
+            "condition": "spike",
+            "value": 1,
+        })
     return triggers
 
 
-def build_stub_news(as_of: str) -> List[NewsDraft]:
-    return [
-        NewsDraft(
-            id="stub-001",
-            title="Fed 利率決議前夕，10年期殖利率飆升至4.7%，TSLA 大跌",
-            summary_zh="市場開始 reprice，交易員認為通膨壓力升溫。",
-            published_at=f"{as_of}T09:00:00Z",
-            source_url="https://www.federalreserve.gov/newsevents/pressreleases.htm",
-        ),
-        NewsDraft(
-            id="stub-002",
-            title="OPEC 封鎖傳聞推升油價飆升，OXY 與 CCJ 大漲",
-            summary_zh="供應中斷疑慮升溫，WTI 接近 90。",
-            published_at=f"{as_of}T11:30:00Z",
-            source_url="https://www.opec.org/opec_web/en/press_room/press_room.htm",
-        ),
-        NewsDraft(
-            id="stub-003",
-            title="ECB 討論降息時程，歐股小幅走高",
-            summary_zh="市場關注利率決議訊號。",
-            published_at=f"{as_of}T12:15:00Z",
-            source_url="https://www.ecb.europa.eu/press/pr/date/html/index.en.html",
-        ),
-        NewsDraft(
-            id="stub-004",
-            title="美國宣布新增出口管制，影響 AI 伺服器供應鏈",
-            summary_zh="部分廠商評估調整庫存與出貨。",
-            published_at=f"{as_of}T13:45:00Z",
-            source_url="https://www.commerce.gov/news/press-releases",
-        ),
-        NewsDraft(
-            id="stub-005",
-            title="核能新訂單帶動電網升級，台灣 1.2 GW 計畫啟動",
-            summary_zh="專案聚焦供電容量與合約節點。",
-            published_at=f"{as_of}T15:00:00Z",
-            source_url="https://www.energy.gov/ne",
-        ),
-    ]
+
+# 新增：動態抓取外部新聞來源
+import feedparser
+import yfinance as yf
+from datetime import datetime
+
+def fetch_external_news(as_of: str, per_source_limit: int = DEFAULT_NEWS_PER_SOURCE) -> List[NewsDraft]:
+    import logging
+    news_items = []
+    # 1. CNBC RSS
+    try:
+        feed = feedparser.parse("https://search.cnbc.com/rs/search/view.xml?partnerId=2000&keywords=finance")
+        for entry in feed.entries[:per_source_limit]:
+            published = getattr(entry, 'published', as_of + "T00:00:00Z")
+            news_items.append(NewsDraft(
+                id=f"cnbc-{entry.link[-8:]}",
+                title=entry.title,
+                summary_zh=getattr(entry, 'summary', ""),
+                published_at=published,
+                source_url=entry.link,
+            ))
+    except Exception as e:
+        logging.warning(f"CNBC RSS fetch failed: {e}")
+    # 2. MarketWatch RSS
+    try:
+        feed = feedparser.parse("http://feeds.marketwatch.com/marketwatch/marketupdates")
+        for entry in feed.entries[:per_source_limit]:
+            published = getattr(entry, 'published', as_of + "T00:00:00Z")
+            news_items.append(NewsDraft(
+                id=f"mw-{entry.link[-8:]}",
+                title=entry.title,
+                summary_zh=getattr(entry, 'summary', ""),
+                published_at=published,
+                source_url=entry.link,
+            ))
+    except Exception as e:
+        logging.warning(f"MarketWatch RSS fetch failed: {e}")
+    # 3. Yahoo Finance
+    try:
+        ticker = yf.Ticker("^GSPC")
+        for news in ticker.news[:per_source_limit]:
+            dt_object = datetime.fromtimestamp(news['providerPublishTime'])
+            published = dt_object.strftime('%Y-%m-%dT%H:%M:%SZ')
+            news_items.append(NewsDraft(
+                id=f"yahoo-{news['uuid']}",
+                title=news['title'],
+                summary_zh=news.get('summary', ""),
+                published_at=published,
+                source_url=news['link'],
+            ))
+    except Exception as e:
+        logging.warning(f"Yahoo Finance fetch failed: {e}")
+
+    # fallback stub if all fail
+    if not news_items:
+        logging.warning("All external news fetch failed, using fallback stub news.")
+        fallback_drafts = [
+            NewsDraft(
+                id="stub-n1-rate-tariff",
+                title="FOMC 升息與關稅升溫，市場重新定價",
+                summary_zh="TSLA 與 OXY 受政策衝擊，殖利率走高。",
+                published_at=as_of + "T00:00:00Z",
+                source_url="https://example.com/fallback-n1-1",
+            ),
+            NewsDraft(
+                id="stub-n1-war-energy",
+                title="戰爭升溫推升油價飆升，能源股大跌",
+                summary_zh="OXY 與 URA 受供應中斷影響，WTI 逼近 90。",
+                published_at=as_of + "T00:00:00Z",
+                source_url="https://example.com/fallback-n1-2",
+            ),
+            NewsDraft(
+                id="stub-n3-ai-power",
+                title="資料中心擴張帶動電力需求",
+                summary_zh="AI 供電合約擴大，電網容量與 PPA 訂單增加。",
+                published_at=as_of + "T00:00:00Z",
+                source_url="https://example.com/fallback-n3-1",
+            ),
+            NewsDraft(
+                id="stub-n3-credit",
+                title="區域銀行流動性觀察",
+                summary_zh="市場關注信用危機與流動性危機風險。",
+                published_at=as_of + "T00:00:00Z",
+                source_url="https://example.com/fallback-n3-2",
+            ),
+            NewsDraft(
+                id="stub-n3-growth",
+                title="科技股回穩，投資人風險偏好回升",
+                summary_zh="TSM 相關供應鏈關注度升高，股價創新高。",
+                published_at=as_of + "T00:00:00Z",
+                source_url="https://example.com/fallback-n3-3",
+            ),
+        ]
+        if per_source_limit >= len(fallback_drafts):
+            news_items = fallback_drafts
+        else:
+            news_items = fallback_drafts[:per_source_limit]
+    return news_items
 
 
 def build_signal_items(as_of: str, user_id: str = "tony") -> List[dict]:
     core_holdings = fetch_core_holdings(user_id)
-    # fallback to empty list ok
     items = []
-    for draft in build_stub_news(as_of):
+    # 改為抓取外部新聞
+    for draft in fetch_external_news(as_of, per_source_limit=DEFAULT_NEWS_PER_SOURCE):
         text = f"{draft.title} {draft.summary_zh}"
         symbols = extract_symbols(text, core_holdings)
         factor_groups = []
