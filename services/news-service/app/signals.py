@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import re
-from typing import List, Dict
+from typing import List, Dict, Tuple
 import os
 import httpx
 
@@ -12,6 +12,12 @@ PORTFOLIO_BASE_URL = os.getenv("PORTFOLIO_BASE_URL", "http://portfolio-service:8
 DEFAULT_CORE_HOLDINGS = ["TSLA", "CCJ", "OXY", "TSM", "URA"]
 DEFAULT_NEWS_PER_SOURCE = int(os.getenv("NEWS_SOURCE_LIMIT", "10"))
 DEFAULT_TOTAL_NEWS_LIMIT = int(os.getenv("NEWS_TOTAL_LIMIT", "10"))
+
+
+def safe_str(value) -> str:
+    if value is None:
+        return ""
+    return str(value).strip()
 
 
 def fetch_core_holdings(user_id: str) -> List[str]:
@@ -84,6 +90,26 @@ MARKET_MECH_KEYWORDS = [
 HUGE_SCALE_REGEX = re.compile(r"\b(\d+(\.\d+)?)(\s?)(GW|兆|十億|Billion|bn)\b", re.IGNORECASE)
 SYMBOL_REGEX = re.compile(r"\b[A-Z]{1,5}\b")
 
+def fetch_positions_name_map(user_id: str) -> Dict[str, str]:
+    """Build name -> symbol map from positions (symbol as English, name_zh as Chinese)."""
+    name_map: Dict[str, str] = {}
+    try:
+        url = f"{PORTFOLIO_BASE_URL}/portfolio/positions"
+        resp = httpx.get(url, params={"user_id": user_id}, timeout=5.0)
+        resp.raise_for_status()
+        data = resp.json()
+        items = data.get("items", []) if isinstance(data, dict) else []
+        for item in items:
+            symbol = safe_str(item.get("symbol", "")).upper()
+            name_zh = safe_str(item.get("name_zh", ""))
+            if symbol:
+                name_map[symbol] = symbol
+            if name_zh:
+                name_map[name_zh] = symbol
+    except Exception:
+        pass
+    return name_map
+
 
 @dataclass(frozen=True)
 class NewsDraft:
@@ -138,10 +164,30 @@ def _match_market_mechanism(text: str) -> bool:
     return _contains_any(text, MARKET_MECH_KEYWORDS)
 
 
-def extract_symbols(text: str, whitelist: List[str]) -> List[str]:
+def _is_ascii(text: str) -> bool:
+    try:
+        text.encode("ascii")
+        return True
+    except Exception:
+        return False
+
+
+def extract_symbols(text: str, whitelist: List[str], name_map: Dict[str, str]) -> List[str]:
     symbols = [match.group(0) for match in SYMBOL_REGEX.finditer(text)]
     whitelist_set = {s.upper() for s in whitelist}
     filtered = [symbol for symbol in symbols if symbol in whitelist_set]
+    # Expand by company names from positions
+    if name_map:
+        text_upper = text.upper()
+        for name, sym in name_map.items():
+            if not name or not sym:
+                continue
+            if _is_ascii(name):
+                if name.upper() in text_upper:
+                    filtered.append(sym.upper())
+            else:
+                if name in text:
+                    filtered.append(sym.upper())
     seen = set()
     unique_symbols = []
     for symbol in filtered:
@@ -151,24 +197,42 @@ def extract_symbols(text: str, whitelist: List[str]) -> List[str]:
     return unique_symbols
 
 
-def compute_n1_score(text: str, symbols: List[str], core_holdings: List[str]) -> int:
+def compute_n1_score(
+    text: str,
+    symbols: List[str],
+    core_holdings: List[str],
+    name_map: Dict[str, str],
+) -> int:
     score = 0
     if _match_rate(text):
-        score += 2
+        score += 4
     if _match_tariff(text):
-        score += 2
+        score += 4
     if _match_war_energy(text):
-        score += 2
+        score += 4
     if _match_credit(text):
-        score += 2
+        score += 4
     if _match_ai_power(text):
-        score += 2
+        score += 3
     if HUGE_SCALE_REGEX.search(text):
         score += 3
     if any(symbol in {s.upper() for s in core_holdings} for symbol in symbols):
         score += 2
     if _match_market_mechanism(text):
         score += 2
+    # Company name mentions as core holdings boost (from positions)
+    if name_map:
+        text_upper = text.upper()
+        for name, sym in name_map.items():
+            if not name or not sym:
+                continue
+            if _is_ascii(name):
+                matched = name.upper() in text_upper
+            else:
+                matched = name in text
+            if matched and sym in {s.upper() for s in core_holdings}:
+                score += 2
+                break
     return score
 
 
@@ -243,6 +307,11 @@ def fetch_external_news(as_of: str, per_source_limit: int = DEFAULT_NEWS_PER_SOU
     import logging
     news_items = []
     headers = {"User-Agent": "Mozilla/5.0"}
+    chinese_sources = [
+        ("cnyes", "https://news.cnyes.com/rss/news/cat/wd_stock"),
+        ("ltn", "https://news.ltn.com.tw/rss/business.xml"),
+        ("hket", "https://www.hket.com/rss/finance"),
+    ]
     # 1. CNBC RSS
     try:
         resp = httpx.get(
@@ -285,7 +354,30 @@ def fetch_external_news(as_of: str, per_source_limit: int = DEFAULT_NEWS_PER_SOU
             ))
     except Exception as e:
         logging.warning(f"MarketWatch RSS fetch failed: {e}")
-    # 3. Yahoo Finance
+    # 3. Chinese RSS sources
+    for prefix, url in chinese_sources:
+        try:
+            resp = httpx.get(
+                url,
+                timeout=10.0,
+                headers=headers,
+                follow_redirects=True,
+            )
+            resp.raise_for_status()
+            feed = feedparser.parse(resp.content)
+            for entry in feed.entries[:per_source_limit]:
+                published = getattr(entry, 'published', as_of + "T00:00:00Z")
+                link = getattr(entry, "link", "")
+                news_items.append(NewsDraft(
+                    id=f"{prefix}-{link[-8:]}" if link else f"{prefix}-{abs(hash(entry.title)) % 10_000}",
+                    title=entry.title,
+                    summary_zh=getattr(entry, 'summary', ""),
+                    published_at=published,
+                    source_url=link,
+                ))
+        except Exception as e:
+            logging.warning(f"{prefix} RSS fetch failed: {e}")
+    # 4. Yahoo Finance
     try:
         resp = httpx.get(
             "https://query2.finance.yahoo.com/v1/finance/search",
@@ -368,11 +460,12 @@ def fetch_external_news(as_of: str, per_source_limit: int = DEFAULT_NEWS_PER_SOU
 
 def build_signal_items(as_of: str, user_id: str = "tony") -> List[dict]:
     core_holdings = fetch_core_holdings(user_id)
+    name_map = fetch_positions_name_map(user_id)
     items = []
     # 改為抓取外部新聞
     for draft in fetch_external_news(as_of, per_source_limit=DEFAULT_NEWS_PER_SOURCE):
         text = f"{draft.title} {draft.summary_zh}"
-        symbols = extract_symbols(text, core_holdings)
+        symbols = extract_symbols(text, core_holdings, name_map)
         factor_groups = []
         seen_groups = set()
         for symbol in symbols:
@@ -382,7 +475,7 @@ def build_signal_items(as_of: str, user_id: str = "tony") -> List[dict]:
                 factor_groups.append(group)
         themes = build_themes(text)
         triggers = build_triggers(text)
-        score = compute_n1_score(text, symbols, core_holdings)
+        score = compute_n1_score(text, symbols, core_holdings, name_map)
         tier = "N1" if score >= 6 else "N3"
         confidence = 0.85 if tier == "N1" else 0.6
         items.append({

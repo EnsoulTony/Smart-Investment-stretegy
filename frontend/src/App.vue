@@ -344,7 +344,10 @@ onMounted(fetchAll);
           </div>
           <div v-if="n1Items.length === 0" class="empty">目前沒有 N1</div>
           <article v-for="item in n1Items" :key="item.id" class="news-card n1">
-            <h4>{{ item.title }}</h4>
+            <div class="news-title">
+              <h4>{{ item.title }}</h4>
+              <span class="score-pill">Score {{ item.score ?? "-" }}</span>
+            </div>
             <p>{{ item.summary_zh }}</p>
             <a
               v-if="item.source_url"
@@ -378,7 +381,10 @@ onMounted(fetchAll);
           </div>
           <div v-if="n3Items.length === 0" class="empty">目前沒有 N3</div>
           <article v-for="item in n3Items" :key="item.id" class="news-card">
-            <h4>{{ item.title }}</h4>
+            <div class="news-title">
+              <h4>{{ item.title }}</h4>
+              <span class="score-pill">Score {{ item.score ?? "-" }}</span>
+            </div>
             <p>{{ item.summary_zh }}</p>
             <a
               v-if="item.source_url"
@@ -995,6 +1001,24 @@ strong {
 .news-card h4 {
   margin: 0;
   font-size: 1.05rem;
+}
+
+.news-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.score-pill {
+  font-size: 0.7rem;
+  padding: 0.15rem 0.5rem;
+  border-radius: 999px;
+  background: rgba(56, 189, 248, 0.15);
+  color: #7dd3fc;
+  border: 1px solid rgba(125, 211, 252, 0.35);
+  white-space: nowrap;
+  font-weight: 700;
 }
 
 .news-card p {
