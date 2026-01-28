@@ -41,6 +41,13 @@ def test_migration_success(db_engine):
         ))
         assert result.fetchone() is not None, "sync_runs 表應該存在"
 
+        # 檢查 symbol_name_mappings 表存在
+        result = conn.execute(text(
+            "SELECT table_name FROM information_schema.tables "
+            "WHERE table_schema = 'public' AND table_name = 'symbol_name_mappings'"
+        ))
+        assert result.fetchone() is not None, "symbol_name_mappings 表應該存在"
+
 
 def test_insert_trade_success(db_session):
     """測試插入一筆 trade 成功。"""

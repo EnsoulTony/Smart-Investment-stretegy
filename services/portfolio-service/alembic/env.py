@@ -16,7 +16,7 @@ import os
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
 from app.db import Base
-from app.models import Trade, Position, SyncRun  # 確保所有 models 都被載入
+from app.models import Trade, Position, SyncRun, CoreHolding, SymbolNameMapping  # 確保所有 models 都被載入
 
 # this is the Alembic Config object, which provides
 # access to the values within the .ini file in use.

@@ -5,5 +5,6 @@
 
 from app.repositories.trades_repo import TradesRepository
 from app.repositories.sync_runs_repo import SyncRunsRepository
+from app.repositories.symbol_name_mappings_repo import SymbolNameMappingsRepository
 
-__all__ = ["TradesRepository", "SyncRunsRepository"]
+__all__ = ["TradesRepository", "SyncRunsRepository", "SymbolNameMappingsRepository"]

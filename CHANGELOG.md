@@ -21,7 +21,17 @@
   - /portfolio/core_holdings/rebuild 標記為 deprecated
 - **frontend**
   - 新增「編輯核心持股」畫面（顯示 symbol + name_zh）
-  - 核心持股只透過 api-gateway 讀寫
+- 核心持股只透過 api-gateway 讀寫
+
+## [0.2.10] - 2026-01-28（symbol 名稱映射表 + 維護介面）
+- **portfolio-service**
+  - 新增 `symbol_name_mappings` 表（TW/US symbol → name_zh）
+  - 同步流程會先查 mapping table，再使用 provider 自動補齊並寫回
+  - 新增 `/portfolio/symbol_mappings` 與 `/portfolio/symbol_mappings/resolve` API
+- **api-gateway**
+  - 新增 symbol mappings 相關端點轉發
+- **frontend**
+  - 新增「資產中文名稱維護」介面（手動維護 + 自動查詢）
 
 ## [0.2.5] - 2026-01-28（Sprint 3：news_signals 落地 + War Room 串接 api-gateway）
 - **news-service：news_signals 落地**

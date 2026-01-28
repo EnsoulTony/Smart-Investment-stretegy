@@ -11,7 +11,6 @@ from typing import List, Dict, Tuple, Optional
 from decimal import Decimal
 from datetime import timezone
 from pydantic import ValidationError
-import httpx
 
 from app.schemas import TradeRecord
 
@@ -88,10 +87,6 @@ class TradeNormalizer:
             "broker": os.getenv("SHEET_COL_BROKER", "broker"),
             "name_zh": os.getenv("SHEET_COL_NAME_ZH", "name_zh"),
         }
-        self.name_cache: Dict[str, str] = {}
-        self.name_provider = os.getenv("SYMBOL_NAME_PROVIDER", "yahoo").lower()
-        self.name_timeout = float(os.getenv("SYMBOL_NAME_TIMEOUT", "3.0"))
-        
         # 台股 ETF 白名單（用於判斷要補到幾碼）
         self.tw_etf_prefixes = {
             "0050", "0051", "0052", "0053", "0055", "0056", "0057", "0061",
@@ -235,9 +230,7 @@ class TradeNormalizer:
                 except Exception as e:
                     return None, f"symbol 正規化失敗：{str(e)}"
 
-            # 由網路查詢中文名稱（若未提供）
-            if not mapped_data.get("name_zh"):
-                mapped_data["name_zh"] = self.resolve_name_zh(mapped_data.get("symbol", ""))
+            # name_zh 交由同步流程的 resolver 補齊（避免在 normalizer 內做外部查詢）
             
             # trade_date 防呆：提前檢查是否為明顯錯誤的值
             if "trade_date" in mapped_data:
@@ -386,35 +379,6 @@ class TradeNormalizer:
         hash_obj = hashlib.sha256(canonical.encode("utf-8"))
         return hash_obj.hexdigest()
 
-    def resolve_name_zh(self, symbol: str) -> str:
-        """從網路查詢標的中文名稱（允許 fallback 空字串）。"""
-        symbol = safe_str(symbol)
-        if not symbol:
-            return ""
-        if symbol in self.name_cache:
-            return self.name_cache[symbol]
-        if self.name_provider in {"disabled", "off", "none"}:
-            return ""
-
-        name = ""
-        try:
-            params = {"q": symbol, "quotesCount": 1, "newsCount": 0}
-            resp = httpx.get(
-                "https://query2.finance.yahoo.com/v1/finance/search",
-                params=params,
-                timeout=self.name_timeout,
-            )
-            resp.raise_for_status()
-            payload = resp.json()
-            quotes = payload.get("quotes") or []
-            if quotes:
-                quote = quotes[0]
-                name = quote.get("shortname") or quote.get("longname") or ""
-        except Exception:
-            name = ""
-
-        self.name_cache[symbol] = name
-        return name
     
     @staticmethod
     def get_canonical_string(trade: TradeRecord) -> str:

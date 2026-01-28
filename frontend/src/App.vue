@@ -38,6 +38,16 @@ const holdingsRebuilding = ref(false);
 const holdingsSavedAt = ref("");
 const holdingsHint = ref("");
 const lastUpdated = ref("");
+const symbolMappings = ref([]);
+const mappingsLoading = ref(false);
+const mappingsError = ref("");
+const mappingSymbol = ref("");
+const mappingMarket = ref("US");
+const mappingNameZh = ref("");
+const mappingSource = ref("manual");
+const mappingResolving = ref(false);
+const mappingSaving = ref(false);
+const mappingsUpdatedAt = ref("");
 
 const n1Items = computed(() => newsItems.value.filter((item) => item.tier === "N1"));
 const n3Items = computed(() => newsItems.value.filter((item) => item.tier === "N3"));
@@ -190,8 +200,93 @@ const saveCoreHoldings = async () => {
   }
 };
 
+const fetchSymbolMappings = async () => {
+  mappingsLoading.value = true;
+  mappingsError.value = "";
+  try {
+    const url = `${API_BASE_URL}/portfolio/symbol_mappings`;
+    const response = await fetch(url);
+    if (!response.ok) {
+      throw new Error(`portfolio-service symbol_mappings ${response.status}`);
+    }
+    const payload = await response.json();
+    symbolMappings.value = payload.items || [];
+  } catch (err) {
+    mappingsError.value = err?.message || "api-gateway 連線失敗";
+  } finally {
+    mappingsLoading.value = false;
+  }
+};
+
+const resolveSymbolMapping = async () => {
+  if (!mappingSymbol.value.trim()) {
+    mappingsError.value = "請先輸入 symbol";
+    return;
+  }
+  mappingResolving.value = true;
+  mappingsError.value = "";
+  try {
+    const url = `${API_BASE_URL}/portfolio/symbol_mappings/resolve`;
+    const response = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        symbol: mappingSymbol.value.trim().toUpperCase(),
+        market: mappingMarket.value,
+      }),
+    });
+    if (!response.ok) {
+      throw new Error(`portfolio-service symbol_mappings resolve ${response.status}`);
+    }
+    const payload = await response.json();
+    mappingNameZh.value = payload.name_zh || "";
+    mappingSource.value = payload.source || "manual";
+    await fetchSymbolMappings();
+  } catch (err) {
+    mappingsError.value = err?.message || "api-gateway 連線失敗";
+  } finally {
+    mappingResolving.value = false;
+  }
+};
+
+const saveSymbolMapping = async () => {
+  if (!mappingSymbol.value.trim() || !mappingNameZh.value.trim()) {
+    mappingsError.value = "請填入 symbol 與中文名稱";
+    return;
+  }
+  mappingSaving.value = true;
+  mappingsError.value = "";
+  try {
+    const url = `${API_BASE_URL}/portfolio/symbol_mappings`;
+    const response = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        symbol: mappingSymbol.value.trim().toUpperCase(),
+        market: mappingMarket.value,
+        name_zh: mappingNameZh.value.trim(),
+        source: mappingSource.value || "manual",
+      }),
+    });
+    if (!response.ok) {
+      throw new Error(`portfolio-service symbol_mappings ${response.status}`);
+    }
+    mappingsUpdatedAt.value = new Date().toLocaleString("zh-TW");
+    await fetchSymbolMappings();
+  } catch (err) {
+    mappingsError.value = err?.message || "api-gateway 連線失敗";
+  } finally {
+    mappingSaving.value = false;
+  }
+};
+
 const fetchAll = async () => {
-  await Promise.all([fetchNewsSignals(), fetchDecisionPackage(), fetchHoldings()]);
+  await Promise.all([
+    fetchNewsSignals(),
+    fetchDecisionPackage(),
+    fetchHoldings(),
+    fetchSymbolMappings(),
+  ]);
 };
 
 onMounted(fetchAll);
@@ -341,6 +436,61 @@ onMounted(fetchAll);
         </button>
         <p class="timestamp" v-if="holdingsSavedAt">已儲存：{{ holdingsSavedAt }}</p>
       </div>
+      </div>
+    </section>
+
+    <section class="panel">
+      <div class="panel-header">
+        <h2>資產中文名稱維護</h2>
+        <span class="badge">portfolio-service</span>
+      </div>
+
+      <div v-if="mappingsError" class="error">
+        {{ mappingsError }}
+      </div>
+
+      <div class="mapping-form">
+        <label class="mapping-field">
+          <span>Symbol</span>
+          <input v-model="mappingSymbol" placeholder="例如：AAPL / 2330.TW" />
+        </label>
+        <label class="mapping-field">
+          <span>Market</span>
+          <select v-model="mappingMarket">
+            <option value="US">US</option>
+            <option value="TW">TW</option>
+          </select>
+        </label>
+        <label class="mapping-field">
+          <span>中文名稱</span>
+          <input v-model="mappingNameZh" placeholder="輸入中文名稱" />
+        </label>
+        <div class="holdings-actions">
+          <button class="refresh" type="button" @click="resolveSymbolMapping" :disabled="mappingResolving">
+            {{ mappingResolving ? "查詢中..." : "自動查詢" }}
+          </button>
+          <button class="refresh" type="button" @click="saveSymbolMapping" :disabled="mappingSaving">
+            {{ mappingSaving ? "儲存中..." : "儲存映射" }}
+          </button>
+          <p class="timestamp" v-if="mappingsUpdatedAt">已更新：{{ mappingsUpdatedAt }}</p>
+        </div>
+      </div>
+
+      <div v-if="mappingsLoading" class="empty">讀取中...</div>
+      <div v-else-if="symbolMappings.length === 0" class="empty">尚無資料</div>
+      <div v-else class="mapping-table">
+        <div class="mapping-row mapping-header">
+          <span>Symbol</span>
+          <span>Market</span>
+          <span>中文名稱</span>
+          <span>來源</span>
+        </div>
+        <div v-for="row in symbolMappings" :key="`${row.symbol}-${row.market}`" class="mapping-row">
+          <span>{{ row.symbol }}</span>
+          <span>{{ row.market }}</span>
+          <span>{{ row.name_zh }}</span>
+          <span>{{ row.source }}</span>
+        </div>
       </div>
     </section>
 
@@ -518,6 +668,48 @@ h1 {
   margin: 0;
   font-size: 0.8rem;
   color: #bbf7d0;
+}
+
+.mapping-form {
+  display: grid;
+  gap: 0.75rem;
+  margin: 1rem 0;
+}
+
+.mapping-field {
+  display: grid;
+  gap: 0.35rem;
+  font-size: 0.9rem;
+  color: #cbd5f5;
+}
+
+.mapping-field input,
+.mapping-field select {
+  padding: 0.5rem 0.75rem;
+  border-radius: 8px;
+  border: 1px solid rgba(148, 163, 184, 0.4);
+  background: rgba(15, 23, 42, 0.7);
+  color: #e2e8f0;
+}
+
+.mapping-table {
+  display: grid;
+  gap: 0.5rem;
+}
+
+.mapping-row {
+  display: grid;
+  grid-template-columns: 1.2fr 0.6fr 1.6fr 1fr;
+  gap: 0.5rem;
+  padding: 0.6rem 0.75rem;
+  background: rgba(15, 23, 42, 0.6);
+  border-radius: 10px;
+  border: 1px solid rgba(148, 163, 184, 0.2);
+}
+
+.mapping-header {
+  font-weight: 600;
+  color: #93c5fd;
 }
 
 .panel {

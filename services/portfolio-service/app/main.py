@@ -8,7 +8,15 @@ from fastapi import FastAPI, Depends, HTTPException, Query, Body
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 from sqlalchemy import inspect
-from .schemas import RebuildPositionsRequest, RebuildPositionsResponse, PositionsResponse, TradesSummaryResponse
+from .schemas import (
+    RebuildPositionsRequest,
+    RebuildPositionsResponse,
+    PositionsResponse,
+    TradesSummaryResponse,
+    SymbolMappingsResponse,
+    SymbolMappingUpsertRequest,
+    SymbolMappingResolveRequest,
+)
 
 from app.db import get_db, engine
 from app.sync_service import SyncService
@@ -20,6 +28,8 @@ from app.models import Trade
 from app.schemas import TradeRecord
 from app.avg_cost_calculator import compute_avg_cost
 from app.core_holdings_service import CoreHoldingsService
+from app.repositories.symbol_name_mappings_repo import SymbolNameMappingsRepository
+from app.symbol_name_resolver import SymbolNameResolver
 from collections import defaultdict
 from decimal import Decimal
 from datetime import date
@@ -75,6 +85,16 @@ async def health() -> dict[str, str]:
 
 def get_core_holdings_service(db: Session = Depends(get_db)) -> CoreHoldingsService:
     return CoreHoldingsService(db)
+
+
+def get_symbol_name_repo(db: Session = Depends(get_db)) -> SymbolNameMappingsRepository:
+    return SymbolNameMappingsRepository(db)
+
+
+def get_symbol_name_resolver(
+    repo: SymbolNameMappingsRepository = Depends(get_symbol_name_repo),
+) -> SymbolNameResolver:
+    return SymbolNameResolver(repo)
 
 
 @app.post("/portfolio/sync", tags=["portfolio"])
@@ -564,4 +584,70 @@ def save_core_holdings(
         "status": "ok",
         "user_id": user_id,
         "count": saved,
+    }
+
+
+@app.get("/portfolio/symbol_mappings", tags=["portfolio"], response_model=SymbolMappingsResponse)
+def list_symbol_mappings(
+    q: Optional[str] = Query(None, description="symbol 查詢（模糊搜尋）"),
+    limit: int = Query(200, ge=1, le=1000, description="回傳筆數上限"),
+    repo: SymbolNameMappingsRepository = Depends(get_symbol_name_repo),
+):
+    rows = repo.list_mappings(query=q, limit=limit)
+    items = [
+        {
+            "symbol": row.symbol,
+            "market": row.market,
+            "name_zh": row.name_zh,
+            "source": row.source,
+            "updated_at": row.updated_at.isoformat() if row.updated_at else None,
+        }
+        for row in rows
+    ]
+    return {"items": items}
+
+
+@app.post("/portfolio/symbol_mappings", tags=["portfolio"])
+def upsert_symbol_mapping(
+    payload: SymbolMappingUpsertRequest,
+    repo: SymbolNameMappingsRepository = Depends(get_symbol_name_repo),
+):
+    mapping = repo.upsert_mapping(
+        symbol=payload.symbol.upper(),
+        market=payload.market.upper(),
+        name_zh=payload.name_zh,
+        source=payload.source or "manual",
+    )
+    return {
+        "symbol": mapping.symbol,
+        "market": mapping.market,
+        "name_zh": mapping.name_zh,
+        "source": mapping.source,
+        "updated_at": mapping.updated_at.isoformat() if mapping.updated_at else None,
+    }
+
+
+@app.post("/portfolio/symbol_mappings/resolve", tags=["portfolio"])
+def resolve_symbol_mapping(
+    payload: SymbolMappingResolveRequest,
+    resolver: SymbolNameResolver = Depends(get_symbol_name_resolver),
+    repo: SymbolNameMappingsRepository = Depends(get_symbol_name_repo),
+):
+    symbol = payload.symbol.upper()
+    market = payload.market.upper() if payload.market else resolver.infer_market(symbol, payload.asset_ccy)
+    name = resolver.resolve(symbol, payload.asset_ccy)
+    if not name:
+        return {
+            "symbol": symbol,
+            "market": market or "UNKNOWN",
+            "name_zh": "",
+            "source": "unresolved",
+        }
+    mapping = repo.get_mapping(symbol, market)
+    return {
+        "symbol": mapping.symbol if mapping else symbol,
+        "market": mapping.market if mapping else (market or "UNKNOWN"),
+        "name_zh": mapping.name_zh if mapping else name,
+        "source": mapping.source if mapping else "resolved",
+        "updated_at": mapping.updated_at.isoformat() if mapping and mapping.updated_at else None,
     }

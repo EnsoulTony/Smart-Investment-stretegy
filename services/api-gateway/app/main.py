@@ -280,6 +280,99 @@ async def proxy_portfolio_core_holdings_save(request: Request) -> Any:
         )
 
 
+@app.get("/portfolio/symbol_mappings", tags=["portfolio"])
+async def proxy_portfolio_symbol_mappings(request: Request) -> Any:
+    """轉發標的中文名稱 mapping 查詢請求到 Portfolio Service。"""
+    target_url = f"{PORTFOLIO_SERVICE_URL}/portfolio/symbol_mappings"
+    try:
+        async with httpx.AsyncClient() as client:
+            response = await client.get(
+                target_url,
+                params=dict(request.query_params),
+                timeout=10.0,
+            )
+        return Response(
+            content=response.content,
+            status_code=response.status_code,
+            headers=dict(response.headers),
+            media_type="application/json",
+        )
+    except httpx.RequestError as e:
+        raise HTTPException(
+            status_code=503,
+            detail=f"無法連線到 Portfolio Service: {str(e)}",
+        )
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"轉發請求時發生錯誤: {str(e)}",
+        )
+
+
+@app.post("/portfolio/symbol_mappings", tags=["portfolio"])
+async def proxy_portfolio_symbol_mappings_save(request: Request) -> Any:
+    """轉發標的中文名稱 mapping 寫入請求到 Portfolio Service。"""
+    target_url = f"{PORTFOLIO_SERVICE_URL}/portfolio/symbol_mappings"
+    try:
+        body = await request.body()
+        async with httpx.AsyncClient() as client:
+            response = await client.post(
+                target_url,
+                params=dict(request.query_params),
+                content=body,
+                headers=dict(request.headers),
+                timeout=10.0,
+            )
+        return Response(
+            content=response.content,
+            status_code=response.status_code,
+            headers=dict(response.headers),
+            media_type="application/json",
+        )
+    except httpx.RequestError as e:
+        raise HTTPException(
+            status_code=503,
+            detail=f"無法連線到 Portfolio Service: {str(e)}",
+        )
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"轉發請求時發生錯誤: {str(e)}",
+        )
+
+
+@app.post("/portfolio/symbol_mappings/resolve", tags=["portfolio"])
+async def proxy_portfolio_symbol_mappings_resolve(request: Request) -> Any:
+    """轉發標的中文名稱 mapping 自動查詢到 Portfolio Service。"""
+    target_url = f"{PORTFOLIO_SERVICE_URL}/portfolio/symbol_mappings/resolve"
+    try:
+        body = await request.body()
+        async with httpx.AsyncClient() as client:
+            response = await client.post(
+                target_url,
+                params=dict(request.query_params),
+                content=body,
+                headers=dict(request.headers),
+                timeout=10.0,
+            )
+        return Response(
+            content=response.content,
+            status_code=response.status_code,
+            headers=dict(response.headers),
+            media_type="application/json",
+        )
+    except httpx.RequestError as e:
+        raise HTTPException(
+            status_code=503,
+            detail=f"無法連線到 Portfolio Service: {str(e)}",
+        )
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"轉發請求時發生錯誤: {str(e)}",
+        )
+
+
 # ============================================================================
 # News Service 反向代理路由
 # ============================================================================

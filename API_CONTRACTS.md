@@ -35,6 +35,15 @@
 ### `POST /portfolio/core_holdings`
 轉發至 portfolio-service 的核心持股設定端點。
 
+### `GET /portfolio/symbol_mappings`
+轉發至 portfolio-service 的標的中文名稱映射查詢端點。
+
+### `POST /portfolio/symbol_mappings`
+轉發至 portfolio-service 的標的中文名稱映射維護端點。
+
+### `POST /portfolio/symbol_mappings/resolve`
+轉發至 portfolio-service 的標的中文名稱自動查詢端點。
+
 ### `GET /news/signals`
 轉發至 news-service 的 `GET /news/signals` 端點（戰情室 UI 入口）。
 （前端統一透過 api-gateway 呼叫，避免跨域與服務直連）
@@ -255,6 +264,75 @@ POST /portfolio/core_holdings?user_id=user-uuid
 #### `POST /portfolio/core_holdings/rebuild`（Deprecated）
 trade is_core 欄位已移除，本端點僅回傳提示訊息，請改用 `/portfolio/core_holdings` 由 UI 設定。
 
+#### `GET /portfolio/symbol_mappings`
+取得標的中文名稱映射清單。
+
+**Request**
+```
+GET /portfolio/symbol_mappings?q=AAPL&limit=200
+```
+
+**Response 200 OK**
+```json
+{
+  "items": [
+    {
+      "symbol": "AAPL",
+      "market": "US",
+      "name_zh": "蘋果",
+      "source": "yahoo_us",
+      "updated_at": "2026-01-28T12:30:00Z"
+    }
+  ]
+}
+```
+
+#### `POST /portfolio/symbol_mappings`
+維護（新增/更新）單筆映射。
+
+**Request**
+```json
+{
+  "symbol": "2330.TW",
+  "market": "TW",
+  "name_zh": "台積電",
+  "source": "manual"
+}
+```
+
+**Response 200 OK**
+```json
+{
+  "symbol": "2330.TW",
+  "market": "TW",
+  "name_zh": "台積電",
+  "source": "manual",
+  "updated_at": "2026-01-28T12:30:00Z"
+}
+```
+
+#### `POST /portfolio/symbol_mappings/resolve`
+用 provider 查詢 symbol，並寫入 mapping table（TW/US）。
+
+**Request**
+```json
+{
+  "symbol": "AAPL",
+  "market": "US"
+}
+```
+
+**Response 200 OK**
+```json
+{
+  "symbol": "AAPL",
+  "market": "US",
+  "name_zh": "蘋果",
+  "source": "yahoo_us",
+  "updated_at": "2026-01-28T12:30:00Z"
+}
+```
+
 ### 資料庫 Schema
 
 #### `trades` 表（寫入 Postgres）
@@ -282,6 +360,16 @@ trade is_core 欄位已移除，本端點僅回傳提示訊息，請改用 `/por
 | user_id | TEXT | 使用者 ID |
 | symbol | TEXT | 股票代號 |
 | is_core | BOOLEAN | 是否核心（預設 true；該表只存設定結果） |
+| updated_at | TIMESTAMP | 更新時間 |
+
+#### `symbol_name_mappings`
+| 欄位 | 型別 | 說明 |
+| --- | --- | --- |
+| id | INTEGER | 主鍵 |
+| symbol | TEXT | 標的代號 |
+| market | TEXT | 市場（TW/US） |
+| name_zh | TEXT | 中文名稱 |
+| source | TEXT | 來源 |
 | updated_at | TIMESTAMP | 更新時間 |
 
 #### `positions`

@@ -77,6 +77,18 @@
 | is_core | BOOLEAN | 是否核心（預設 true） |
 | updated_at | TIMESTAMP | 更新時間 |
 
+### symbol_name_mappings
+標的中文名稱映射（symbol → name_zh）
+
+| 欄位 | 型別 | 說明 |
+| --- | --- | --- |
+| id | BIGSERIAL | 主鍵 |
+| symbol | TEXT | 標的代號 |
+| market | TEXT | 市場（TW/US） |
+| name_zh | TEXT | 中文名稱 |
+| source | TEXT | 來源（yahoo_tw/yahoo_us/manual） |
+| updated_at | TIMESTAMP | 更新時間 |
+
 ---
 
 ## 2) radar-service

@@ -55,10 +55,11 @@ def db_session(db_engine):
     
     # 清空測試相關的表（在 transaction 內，確保可回滾）
     # 注意：使用 DELETE 而非 TRUNCATE，因為 TRUNCATE 會立即提交
-    from app.models import Trade, SyncRun, Position
+    from app.models import Trade, SyncRun, Position, SymbolNameMapping
     session.query(Trade).delete()
     session.query(SyncRun).delete()
     session.query(Position).delete()
+    session.query(SymbolNameMapping).delete()
     session.commit()  # 提交清空操作到外層 transaction
     
     # 開啟第一個 nested transaction (SAVEPOINT)

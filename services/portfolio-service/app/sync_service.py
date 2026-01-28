@@ -17,7 +17,9 @@ from sqlalchemy.orm import Session
 from app.sheets_client import SheetsClient
 from app.trade_normalizer import TradeNormalizer
 from app.repositories.trades_repo import TradesRepository
+from app.repositories.symbol_name_mappings_repo import SymbolNameMappingsRepository
 from app.repositories.sync_runs_repo import SyncRunsRepository
+from app.symbol_name_resolver import SymbolNameResolver
 
 # 設定 logger
 logger = logging.getLogger(__name__)
@@ -89,6 +91,8 @@ class SyncService:
         self.sheets_client = sheets_client or SheetsClient()
         self.trades_repo = TradesRepository(session)
         self.sync_runs_repo = SyncRunsRepository(session)
+        self.symbol_repo = SymbolNameMappingsRepository(session)
+        self.symbol_resolver = SymbolNameResolver(self.symbol_repo)
         self.normalizer = TradeNormalizer()
     
     def run_sync(self) -> SyncResult:
@@ -126,7 +130,20 @@ class SyncService:
             
             errors_count = normalized_invalid_count
             
-            # Step 4: 批次寫入 trades 表（使用 ON CONFLICT DO NOTHING 去重）
+            # Step 4: 補齊 name_zh（mapping table + provider）
+            if valid_trades:
+                symbol_cache: Dict[str, str] = {}
+                for trade in valid_trades:
+                    if trade.name_zh:
+                        continue
+                    key = f"{trade.symbol}|{trade.asset_ccy}"
+                    if key not in symbol_cache:
+                        symbol_cache[key] = self.symbol_resolver.resolve(
+                            trade.symbol, trade.asset_ccy
+                        )
+                    trade.name_zh = symbol_cache[key]
+
+            # Step 5: 批次寫入 trades 表（使用 ON CONFLICT DO NOTHING 去重）
             inserted_count, duplicates_count = 0, 0
             
             if valid_trades:
@@ -142,7 +159,7 @@ class SyncService:
             # skipped_count = 重複筆數 + 驗證失敗筆數
             skipped_count = duplicates_count + errors_count
             
-            # Step 5: 建立錯誤摘要（最多保留前 20 筆，包含原始資料）
+            # Step 6: 建立錯誤摘要（最多保留前 20 筆，包含原始資料）
             error_message = None
             if errors_count > 0:
                 error_summary = {
@@ -158,7 +175,7 @@ class SyncService:
                 }
                 error_message = json.dumps(error_summary, ensure_ascii=False)
             
-            # Step 6: 判斷同步狀態
+            # Step 7: 判斷同步狀態
             if inserted_count > 0 and (errors_count > 0 or duplicates_count > 0):
                 status = "partial_succeeded"
             elif inserted_count > 0 and errors_count == 0 and duplicates_count == 0:
@@ -171,7 +188,7 @@ class SyncService:
             
             logger.info(f"同步狀態：{status}")
             
-            # Step 7: 更新 sync_run 狀態
+            # Step 8: 更新 sync_run 狀態
             self.sync_runs_repo.finish_run(
                 run_id=run_id,
                 status=status,

@@ -205,3 +205,28 @@ class TradesSummaryResponse(BaseModel):
     evidence: dict = Field(..., description="可證偽證據（包含 verification_sql）")
     
     model_config = ConfigDict(from_attributes=True)
+
+
+class SymbolMappingItem(BaseModel):
+    symbol: str
+    market: str
+    name_zh: str
+    source: str
+    updated_at: Optional[str] = None
+
+
+class SymbolMappingsResponse(BaseModel):
+    items: List[SymbolMappingItem]
+
+
+class SymbolMappingUpsertRequest(BaseModel):
+    symbol: str = Field(..., min_length=1)
+    market: str = Field(..., min_length=1)
+    name_zh: str = Field(..., min_length=1)
+    source: Optional[str] = "manual"
+
+
+class SymbolMappingResolveRequest(BaseModel):
+    symbol: str = Field(..., min_length=1)
+    asset_ccy: Optional[str] = None
+    market: Optional[str] = None

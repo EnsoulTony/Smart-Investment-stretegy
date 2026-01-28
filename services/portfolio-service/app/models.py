@@ -14,7 +14,7 @@ from sqlalchemy.orm import synonym
 import uuid
 
 from app.db import Base
-from app.models_core import CoreHolding  # noqa: F401 - exported for Alembic autoload
+from app.models_core import CoreHolding, SymbolNameMapping  # noqa: F401 - exported for Alembic autoload
 
 
 class Trade(Base):

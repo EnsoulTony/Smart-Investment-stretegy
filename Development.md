@@ -1245,6 +1245,7 @@ docker compose run --rm -e DATABASE_URL=x valuation-service python -c "from app.
 - Google Sheet 只作為「交易來源」：同步後以本地 Postgres 為唯一真相來源（truth source）。
 - 核心持股不寫死、不在來源表勾選：由使用者在前端介面勾選 → 透過 portfolio-service API 寫入 `core_holdings`。
 - news-service 不重複持股邏輯：透過 HTTP 向 portfolio-service 取 `core_holdings` 來做規則 C（命中核心持股 +2）。
+- 資產中文名稱維護：以 `symbol_name_mappings` 為本地真相，先查 mapping table，缺少時再由 provider（TW/US）查詢並寫回。
 
 ### 核心端點
 
