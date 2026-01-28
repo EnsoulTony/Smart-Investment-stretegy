@@ -11,6 +11,7 @@ import httpx
 PORTFOLIO_BASE_URL = os.getenv("PORTFOLIO_BASE_URL", "http://portfolio-service:8001")
 DEFAULT_CORE_HOLDINGS = ["TSLA", "CCJ", "OXY", "TSM", "URA"]
 DEFAULT_NEWS_PER_SOURCE = int(os.getenv("NEWS_SOURCE_LIMIT", "10"))
+DEFAULT_TOTAL_NEWS_LIMIT = int(os.getenv("NEWS_TOTAL_LIMIT", "10"))
 
 
 def fetch_core_holdings(user_id: str) -> List[str]:
@@ -221,15 +222,22 @@ def build_triggers(text: str) -> List[dict]:
 
 # 新增：動態抓取外部新聞來源
 import feedparser
-import yfinance as yf
 from datetime import datetime
 
 def fetch_external_news(as_of: str, per_source_limit: int = DEFAULT_NEWS_PER_SOURCE) -> List[NewsDraft]:
     import logging
     news_items = []
+    headers = {"User-Agent": "Mozilla/5.0"}
     # 1. CNBC RSS
     try:
-        feed = feedparser.parse("https://search.cnbc.com/rs/search/view.xml?partnerId=2000&keywords=finance")
+        resp = httpx.get(
+            "https://search.cnbc.com/rs/search/view.xml?partnerId=2000&keywords=finance",
+            timeout=10.0,
+            headers=headers,
+            follow_redirects=True,
+        )
+        resp.raise_for_status()
+        feed = feedparser.parse(resp.content)
         for entry in feed.entries[:per_source_limit]:
             published = getattr(entry, 'published', as_of + "T00:00:00Z")
             news_items.append(NewsDraft(
@@ -243,7 +251,14 @@ def fetch_external_news(as_of: str, per_source_limit: int = DEFAULT_NEWS_PER_SOU
         logging.warning(f"CNBC RSS fetch failed: {e}")
     # 2. MarketWatch RSS
     try:
-        feed = feedparser.parse("http://feeds.marketwatch.com/marketwatch/marketupdates")
+        resp = httpx.get(
+            "https://feeds.marketwatch.com/marketwatch/marketupdates",
+            timeout=10.0,
+            headers=headers,
+            follow_redirects=True,
+        )
+        resp.raise_for_status()
+        feed = feedparser.parse(resp.content)
         for entry in feed.entries[:per_source_limit]:
             published = getattr(entry, 'published', as_of + "T00:00:00Z")
             news_items.append(NewsDraft(
@@ -257,16 +272,26 @@ def fetch_external_news(as_of: str, per_source_limit: int = DEFAULT_NEWS_PER_SOU
         logging.warning(f"MarketWatch RSS fetch failed: {e}")
     # 3. Yahoo Finance
     try:
-        ticker = yf.Ticker("^GSPC")
-        for news in ticker.news[:per_source_limit]:
-            dt_object = datetime.fromtimestamp(news['providerPublishTime'])
-            published = dt_object.strftime('%Y-%m-%dT%H:%M:%SZ')
+        resp = httpx.get(
+            "https://query2.finance.yahoo.com/v1/finance/search",
+            params={"q": "^GSPC", "quotesCount": 1, "newsCount": per_source_limit},
+            timeout=10.0,
+            headers=headers,
+        )
+        resp.raise_for_status()
+        payload = resp.json()
+        for news in (payload.get("news") or [])[:per_source_limit]:
+            ts = news.get("providerPublishTime")
+            if isinstance(ts, (int, float)):
+                published = datetime.fromtimestamp(ts).strftime('%Y-%m-%dT%H:%M:%SZ')
+            else:
+                published = as_of + "T00:00:00Z"
             news_items.append(NewsDraft(
-                id=f"yahoo-{news['uuid']}",
-                title=news['title'],
-                summary_zh=news.get('summary', ""),
+                id=f"yahoo-{news.get('uuid', '')}",
+                title=news.get('title', ''),
+                summary_zh=news.get('summary', "") or "",
                 published_at=published,
-                source_url=news['link'],
+                source_url=news.get('link', '') or "",
             ))
     except Exception as e:
         logging.warning(f"Yahoo Finance fetch failed: {e}")
@@ -311,10 +336,18 @@ def fetch_external_news(as_of: str, per_source_limit: int = DEFAULT_NEWS_PER_SOU
                 source_url="https://example.com/fallback-n3-3",
             ),
         ]
-        if per_source_limit >= len(fallback_drafts):
-            news_items = fallback_drafts
-        else:
-            news_items = fallback_drafts[:per_source_limit]
+        desired = max(per_source_limit * 3, DEFAULT_TOTAL_NEWS_LIMIT)
+        # Repeat with unique ids to reach desired count
+        news_items = []
+        for i in range(desired):
+            base = fallback_drafts[i % len(fallback_drafts)]
+            news_items.append(NewsDraft(
+                id=f"{base.id}-{i+1}",
+                title=base.title,
+                summary_zh=base.summary_zh,
+                published_at=base.published_at,
+                source_url=base.source_url,
+            ))
     return news_items
 
 
@@ -339,6 +372,7 @@ def build_signal_items(as_of: str, user_id: str = "tony") -> List[dict]:
         confidence = 0.85 if tier == "N1" else 0.6
         items.append({
             "id": draft.id,
+            "score": score,
             "tier": tier,
             "title": draft.title,
             "published_at": draft.published_at,
@@ -350,4 +384,7 @@ def build_signal_items(as_of: str, user_id: str = "tony") -> List[dict]:
             "falsifiable_triggers": triggers,
             "confidence": confidence,
         })
-    return items
+    # 排序後取前 N 筆
+    items.sort(key=lambda item: item["score"], reverse=True)
+    trimmed = items[:DEFAULT_TOTAL_NEWS_LIMIT]
+    return trimmed
