@@ -269,6 +269,7 @@ def build_signal_items(as_of: str, user_id: str = "tony") -> List[dict]:
             "title": draft.title,
             "published_at": draft.published_at,
             "summary_zh": draft.summary_zh,
+            "source_url": f"https://example.com/news/{draft.id}",
             "symbols": symbols,
             "factor_groups": factor_groups,
             "themes": themes,

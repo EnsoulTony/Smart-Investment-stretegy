@@ -14,6 +14,9 @@ NEWS_PORT="${NEWS_PORT:-8003}"          # <-- updated default
 RADAR_PORT="${RADAR_PORT:-8002}"
 AS_OF="${AS_OF:-$(date +%F)}"
 USER_ID="${USER_ID:-tony}"
+POSTGRES_SVC="${POSTGRES_SVC:-postgres}"
+DB_NAME="${DB_NAME:-investment_db}"
+DB_USER="${DB_USER:-investment}"
 
 echo "=============================================="
 echo "Sprint 3 Verification Script"
@@ -24,6 +27,9 @@ echo "  NEWS_PORT=${NEWS_PORT}"
 echo "  RADAR_PORT=${RADAR_PORT}"
 echo "  AS_OF=${AS_OF}"
 echo "  USER_ID=${USER_ID}"
+echo "  POSTGRES_SVC=${POSTGRES_SVC}"
+echo "  DB_NAME=${DB_NAME}"
+echo "  DB_USER=${DB_USER}"
 echo
 
 cd "${ROOT_DIR}"
@@ -57,21 +63,40 @@ wait_http_200() {
 need_cmd curl
 need_cmd jq
 
-echo "[1/6] Building and starting services..."
+echo "[1/7] Building and starting services..."
 ./dc.sh up -d --build
 
 echo
-echo "[1.5/6] Running DB migrations for portfolio-service..."
+echo "[1.5/7] Running DB migrations for portfolio-service..."
 ./dc.sh exec -T portfolio-service alembic upgrade head
 
 echo
-echo "[2/6] Waiting for services to be ready..."
+echo "[1.6/7] Running DB migrations for news-service..."
+./dc.sh exec -T news-service alembic upgrade head
+
+echo
+echo "[2/7] Waiting for services to be ready..."
 wait_http_200 "http://localhost:${NEWS_PORT}/health" "news-service"
 # radar-service not strictly required for Sprint 3, but handy if later integration exists
 wait_http_200 "http://localhost:${RADAR_PORT}/health" "radar-service" || true
 
 echo
-echo "[3/6] Testing news-service signals endpoint..."
+echo "[2.5/7] Checking war-room UI availability..."
+UI_URL="${UI_URL:-http://localhost:8080}"
+if curl -fsS "${UI_URL}" >/tmp/warroom.html; then
+  if grep -Eq "Sprint 3 War Room|Smart Investment Strategy" /tmp/warroom.html; then
+    echo "  ✓ war-room UI is available (${UI_URL})"
+  else
+    echo "❌ war-room UI loaded but content check failed (missing expected marker)"
+    exit 1
+  fi
+else
+  echo "❌ war-room UI not reachable: ${UI_URL}"
+  exit 1
+fi
+
+echo
+echo "[3/7] Testing news-service signals endpoint..."
 SIGNALS_URL="http://localhost:${NEWS_PORT}/news/signals?user_id=${USER_ID}&as_of=${AS_OF}"
 
 # Basic HTTP + content-type check
@@ -138,7 +163,7 @@ fi
 echo "  ✓ Tier distribution OK (N1=${N1_COUNT}, N3=${N3_COUNT})"
 
 echo
-echo "[4/6] Sprint 3 hard acceptance checks..."
+echo "[4/7] Sprint 3 hard acceptance checks..."
 # Ensure tiers are only N1 or N3
 BAD_TIER="$(echo "${PAYLOAD}" | jq '[.items[] | select(.tier!="N1" and .tier!="N3")] | length')"
 if [[ "${BAD_TIER}" -ne 0 ]]; then
@@ -157,12 +182,30 @@ echo "  ✓ All triggers contain required keys (type/name/condition/value)"
 echo "  ✓ Sprint 3 hard acceptance checks passed"
 
 echo
-echo "[5/6] Running pytest in news-service container..."
+echo "[4.5/7] Verifying news_signals persistence in Postgres..."
+TABLE_EXISTS="$(./dc.sh exec -T "${POSTGRES_SVC}" psql -U "${DB_USER}" -d "${DB_NAME}" -tAc "SELECT to_regclass('public.news_signals');")"
+TABLE_EXISTS="$(echo "${TABLE_EXISTS}" | tr -d '[:space:]')"
+if [[ -z "${TABLE_EXISTS}" || "${TABLE_EXISTS}" == "null" ]]; then
+  echo "❌ news_signals table not found in ${DB_NAME}. Expected public.news_signals."
+  exit 1
+fi
+echo "  ✓ news_signals table exists (${TABLE_EXISTS})"
+
+ROW_COUNT="$(./dc.sh exec -T "${POSTGRES_SVC}" psql -U "${DB_USER}" -d "${DB_NAME}" -tAc "SELECT COUNT(*) FROM public.news_signals;")"
+ROW_COUNT="$(echo "${ROW_COUNT}" | tr -d '[:space:]')"
+if [[ -z "${ROW_COUNT}" || "${ROW_COUNT}" -lt 1 ]]; then
+  echo "❌ news_signals table has no rows (count=${ROW_COUNT:-0})"
+  exit 1
+fi
+echo "  ✓ news_signals has >= 1 rows (count=${ROW_COUNT})"
+
+echo
+echo "[5/7] Running pytest in news-service container..."
 ./dc.sh exec -T news-service pytest -q
 echo "  ✓ news-service pytest PASSED"
 
 echo
-echo "[6/6] (Optional) Running pytest in radar-service container..."
+echo "[6/7] (Optional) Running pytest in radar-service container..."
 RUN_RADAR_TESTS="${RUN_RADAR_TESTS:-1}"
 if [[ "${RUN_RADAR_TESTS}" == "1" ]]; then
   ./dc.sh exec -T radar-service pytest -q

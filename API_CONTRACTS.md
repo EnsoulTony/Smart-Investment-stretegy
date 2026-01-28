@@ -26,6 +26,10 @@
 }
 ```
 
+### `GET /news/signals`
+轉發至 news-service 的 `GET /news/signals` 端點（戰情室 UI 入口）。
+（前端統一透過 api-gateway 呼叫，避免跨域與服務直連）
+
 ### `GET /dashboard`
 ```json
 {
@@ -560,6 +564,10 @@ GET /news/signals?user_id=user-uuid&as_of=YYYY-MM-DD
 
 **falsifiable_triggers[] 必要欄位**
 - `type`, `name`, `condition`, `value`
+
+**落地說明（Sprint 3）**
+- news-service 每次產出 signals 會將 item 落地到 `public.news_signals` 表
+- 主要欄位：`title`, `published_at`, `source_url`, `payload`（完整 item JSON）
 
 ## 5. research-service
 

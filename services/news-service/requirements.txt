@@ -1,1 +1,4 @@
-# 針對 News Service 的額外依賴（目前預留，未使用）
+# 針對 News Service 的額外依賴
+alembic==1.13.2
+SQLAlchemy==2.0.32
+psycopg2-binary==2.9.9

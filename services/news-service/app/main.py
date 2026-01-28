@@ -1,9 +1,10 @@
 """News Service 的 FastAPI 進入點。"""
 
 import os
-from fastapi import FastAPI, Query
+from fastapi import FastAPI, Query, HTTPException
 
 from app.signals import build_signal_items
+from app.db import persist_news_signals
 
 SERVICE_NAME = os.getenv("SERVICE_NAME", "news-service")
 app = FastAPI(title="News Service", version="0.1.0")
@@ -22,6 +23,10 @@ async def news_signals(
 ) -> dict:
     """Return deterministic Sprint 3 news signals."""
     items = build_signal_items(as_of, user_id=user_id)
+    try:
+        persist_news_signals(user_id=user_id, as_of=as_of, source="stub", items=items)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"persist_news_signals failed: {str(e)}")
     return {
         "schema_version": "3.0",
         "as_of": as_of,

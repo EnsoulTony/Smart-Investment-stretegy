@@ -13,6 +13,8 @@ RUN pip install --no-cache-dir -r /tmp/base-requirements.txt -r /tmp/service-req
 
 COPY services/news-service/app /app/app
 COPY services/news-service/tests /app/tests
+COPY services/news-service/alembic.ini /app/alembic.ini
+COPY services/news-service/alembic /app/alembic
 
 ENV PORT=8003
 ENV SERVICE_NAME=news-service

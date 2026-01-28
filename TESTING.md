@@ -37,7 +37,7 @@
 ### Sprint 驗收腳本（可回歸）
 
 - Sprint 2：`./tools/verify_sprint_2.sh`
-- Sprint 3：`./tools/verify_sprint_3.sh`（含 migrations、news signals contract、tier 分佈、triggers 必備、pytest）
+- Sprint 3：`./tools/verify_sprint_3.sh`（含 migrations、news signals contract、tier 分佈、triggers 必備、news_signals 落地檢查、戰情室 UI 存活、pytest）
 
 ## 4. CI 建議（未來擴充）
 

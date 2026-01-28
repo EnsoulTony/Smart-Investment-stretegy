@@ -1,5 +1,23 @@
 # CHANGELOG.md｜版本沿革
 
+## [0.2.5] - 2026-01-28（Sprint 3：news_signals 落地 + War Room 串接 api-gateway）
+- **news-service：news_signals 落地**
+  - 新增 news-service Alembic migration，建立 `public.news_signals` 表
+  - `/news/signals` 呼叫時寫入 DB（含 title/published_at/source_url/payload）
+- **api-gateway：新增 /news/signals 轉發**
+  - 前端改透過 api-gateway 取得 news signals，符合微服務邊界
+- **verify_sprint_3.sh**：新增 news-service migration 步驟與 DB 落地檢查
+
+## [0.2.6] - 2026-01-28（Sprint 3：War Room UI + 可配置化前端 API）
+- **Frontend War Room**
+  - 新增戰情室首頁顯示 news-service N1/N3 signals（含 triggers/symbols/themes）
+  - UI 透過 api-gateway 存取 `/news/signals`
+- **可配置化部署**
+  - `docker-compose.yml` 改用 `VITE_API_BASE_URL` / `CORS_ALLOW_ORIGINS` / `NEWS_SERVICE_URL` 環境變數（避免寫死 IP）
+  - api-gateway 啟用 CORS（允許戰情室前端跨域呼叫）
+- **verify_sprint_3.sh**
+  - 新增戰情室 UI URL 存活檢查（可用 `UI_URL` 覆蓋）
+
 ## [0.2.4] - 2026-01-27（Sprint 3：News N1/N3 signals + Core Holdings 設定落地）
 - **news-service：新增可驗收的新聞訊號端點**
   - 新增 `GET /news/signals?user_id=tony&as_of=YYYY-MM-DD`

@@ -3,12 +3,27 @@
 import os
 import httpx
 from fastapi import FastAPI, Request, Response, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
 from typing import Any
 
 SERVICE_NAME = os.getenv("SERVICE_NAME", "api-gateway")
 PORTFOLIO_SERVICE_URL = os.getenv("PORTFOLIO_SERVICE_URL", "http://portfolio-service:8001")
+NEWS_SERVICE_URL = os.getenv("NEWS_SERVICE_URL", "http://news-service:8003")
+CORS_ALLOW_ORIGINS = os.getenv(
+    "CORS_ALLOW_ORIGINS",
+    "http://localhost:8080,http://127.0.0.1:8080",
+)
 
 app = FastAPI(title="API Gateway / Web BFF", version="0.1.0")
+
+origins = [origin.strip() for origin in CORS_ALLOW_ORIGINS.split(",") if origin.strip()]
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=origins,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 
 @app.get("/health", tags=["health"])
@@ -110,4 +125,37 @@ async def proxy_portfolio_health() -> Any:
         raise HTTPException(
             status_code=500,
             detail=f"轉發請求時發生錯誤: {str(e)}"
+        )
+
+
+# ============================================================================
+# News Service 反向代理路由
+# ============================================================================
+
+@app.get("/news/signals", tags=["news"])
+async def proxy_news_signals(request: Request) -> Any:
+    """轉發 news signals 請求到 News Service。"""
+    target_url = f"{NEWS_SERVICE_URL}/news/signals"
+    try:
+        async with httpx.AsyncClient() as client:
+            response = await client.get(
+                target_url,
+                params=dict(request.query_params),
+                timeout=10.0,
+            )
+        return Response(
+            content=response.content,
+            status_code=response.status_code,
+            headers=dict(response.headers),
+            media_type="application/json",
+        )
+    except httpx.RequestError as e:
+        raise HTTPException(
+            status_code=503,
+            detail=f"無法連線到 News Service: {str(e)}",
+        )
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"轉發請求時發生錯誤: {str(e)}",
         )

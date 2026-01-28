@@ -49,6 +49,7 @@ Smart-Investment-Strategy 採微服務架構，分為前端、API Gateway、四�
   - 目前提供：
     - `POST /portfolio/sync` → portfolio-service
     - `GET /portfolio/health` → portfolio-service
+    - `GET /news/signals` → news-service（戰情室首頁使用）
   - JWT 驗證（簡易登入）（TODO）。
   - 聚合 portfolio/radar/news/research 的資料，對前端提供單一 API（TODO）。
 - **portfolio-service**：
@@ -73,6 +74,7 @@ Smart-Investment-Strategy 採微服務架構，分為前端、API Gateway、四�
   - 產出新聞訊號 `GET /news/signals`（N1/N3 以固定打分規則決定 tier，可回歸）。
   - 透過 HTTP 向 `portfolio-service` 取得 `core_holdings`（核心持股清單），避免寫死 holdings 與重複邏輯。
   - Sprint 3 先提供 deterministic stub provider，避免外部資料源造成測試漂移（後續可替換真 provider）。
+  - signals 會落地到 `public.news_signals`（供後續分析與 UI 查詢）。
 - **research-service**：
   - 抓取國泰 PDF、允許手動匯入券商報告，產出 `research_signals`。
 - **Postgres**：
@@ -84,7 +86,8 @@ Smart-Investment-Strategy 採微服務架構，分為前端、API Gateway、四�
 2. 使用者透過前端介面勾選核心持股 → `portfolio-service` 寫入 `core_holdings`（本地 DB）。
 3. `radar-service` 讀取 `indicator_values`（含 `RS_XLU_XLK`）+ 持倉資料 → 產出建議。
 4. `news-service` 以請求時點（as_of）產出 news signals，並引用 `core_holdings` 輔助打分/映射（不直接讀 DB）。
-5. `api-gateway` 聚合上述資料 → 提供前端 UI。
+5. `news-service` 同步將 signals 落地至 `news_signals` 表。
+6. `api-gateway` 聚合上述資料 → 提供戰情室 UI（前端統一走 gateway）。
 
 ## 部署拓樸
 

@@ -1249,6 +1249,16 @@ docker compose run --rm -e DATABASE_URL=x valuation-service python -c "from app.
   - `POST /portfolio/core_holdings?user_id=tony`：全量覆寫核心持股清單（DB）
 - news-service
   - `GET /news/signals?user_id=tony&as_of=YYYY-MM-DD`：回傳 N1/N3 news signals（固定規則、deterministic stub）
+  - 產出 signals 會落地到 `public.news_signals`（DB 持久化，便於後續分析）
+- api-gateway
+  - `GET /news/signals` 轉發至 news-service（戰情室前端使用）
+
+### 部署注意事項（戰情室前端）
+
+- 前端由瀏覽器執行，**不能**使用 `localhost` 指向伺服器。
+- 請透過環境變數設定：
+  - `VITE_API_BASE_URL`：api-gateway 外部可訪問位址
+  - `CORS_ALLOW_ORIGINS`：允許的前端來源（例如 `http://<HOST>:8080`）
 
 ### 一鍵驗收
 
