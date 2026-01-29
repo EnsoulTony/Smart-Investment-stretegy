@@ -1,5 +1,16 @@
 # CHANGELOG.md｜版本沿革
 
+## [0.2.11] - 2026-01-29（news-service 外部新聞開關 + TW symbol 正規化）
+- **news-service**
+  - 新增 `NEWS_EXTERNAL_ENABLED` 開關（關閉時不抓外部新聞，來源失敗則回空列表）
+  - symbols 解析支援 4–6 位數字與 `.TW/.TWO` 正規化
+  - 調整 signals contract 測試，允許空 items
+- **portfolio-service**
+  - 台股代碼補零修正（9xxx/09xxx 補到 6 位，保留前導 0）
+  - TW symbol regex 擴充為 4–6 位
+- **docker-compose**
+  - news-service 預設啟用 `NEWS_EXTERNAL_ENABLED=1`
+
 ## [0.2.8] - 2026-01-28（Sprint 4：Decision Fusion + Snapshot）
 - **radar-service：融合 news_signals + 決策快照**
   - `/radar/decision` 讀取 `news_signals`（DB）並產出 `evidence.news_context`

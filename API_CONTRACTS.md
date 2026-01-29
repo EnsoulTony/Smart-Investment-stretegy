@@ -660,7 +660,7 @@ GET /indicators/sector-rotation?symbols=XLU,XLK&as_of=2025-01-20
 ## 4. news-service
 
 ### `GET /news/signals`
-以固定規則產出可驗收的新聞訊號（N1/N3），禁止主觀推論。
+以固定規則產出可驗收的新聞訊號（N1/N3），禁止主觀推論。若外部來源關閉或全數失敗，`items` 可能為空。
 
 **Request**
 ```
@@ -700,6 +700,10 @@ GET /news/signals?user_id=user-uuid&as_of=YYYY-MM-DD
 
 **falsifiable_triggers[] 必要欄位**
 - `type`, `name`, `condition`, `value`
+
+**環境變數**
+- `NEWS_EXTERNAL_ENABLED=1`：啟用外部新聞抓取（RSS/Yahoo）
+- `NEWS_EXTERNAL_ENABLED=0`：關閉外部新聞抓取，若無來源則 `items=[]`
 
 **落地說明（Sprint 3）**
 - news-service 每次產出 signals 會將 item 落地到 `public.news_signals` 表

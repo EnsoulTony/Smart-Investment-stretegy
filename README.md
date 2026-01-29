@@ -100,6 +100,7 @@
 	 ```bash
 	 cp .env.example .env
 	 ```
+	 - 若需啟用外部新聞抓取，設定 `NEWS_EXTERNAL_ENABLED=1`
 2. 安裝前端依賴（開發模式需要）：
 	 ```bash
 	 make install-frontend
