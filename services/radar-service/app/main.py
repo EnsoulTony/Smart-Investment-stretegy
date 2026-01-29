@@ -17,6 +17,7 @@ from .db import (
     fetch_decision_history,
     build_news_inputs,
     insert_trigger_evaluations,
+    fetch_trigger_history,
 )
 from .news_fusion import (
     compute_news_score,
@@ -541,3 +542,58 @@ async def get_decision_history(
                 "message": f"DB read failed: {str(e)}",
             },
         )
+
+
+@app.get("/radar/triggers/history", tags=["radar"])
+async def get_trigger_history(
+    user_id: str = Query(..., description="User ID for trigger history lookup"),
+    from_date: str = Query(..., alias="from", description="Start date (YYYY-MM-DD)"),
+    to_date: str = Query(..., alias="to", description="End date (YYYY-MM-DD)"),
+    plugin: str = Query(default="v1.4", description="Strategy plugin"),
+    trigger_type: Optional[str] = Query(default=None, description="Trigger type"),
+    is_triggered: Optional[bool] = Query(default=None, description="Filter by triggered"),
+    limit: int = Query(default=200, ge=1, le=500, description="Max rows"),
+    offset: int = Query(default=0, ge=0, description="Offset"),
+) -> dict:
+    """Return trigger evaluation history for a user."""
+    try:
+        from_dt = date.fromisoformat(from_date)
+        to_dt = date.fromisoformat(to_date)
+    except ValueError:
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "status": "invalid_request",
+                "message": "Invalid date format. Expected YYYY-MM-DD",
+            },
+        )
+
+    try:
+        items = fetch_trigger_history(
+            user_id=user_id,
+            plugin=plugin,
+            from_date=from_dt,
+            to_date=to_dt,
+            trigger_type=trigger_type,
+            is_triggered=is_triggered,
+            limit=limit,
+            offset=offset,
+        )
+    except Exception as e:
+        raise HTTPException(
+            status_code=502,
+            detail={
+                "status": "upstream_error",
+                "service": "postgres",
+                "message": f"DB read failed: {str(e)}",
+            },
+        )
+
+    return {
+        "schema_version": "1.0",
+        "user_id": user_id,
+        "plugin": plugin,
+        "from": from_dt.isoformat(),
+        "to": to_dt.isoformat(),
+        "items": items,
+    }

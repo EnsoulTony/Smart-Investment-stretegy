@@ -178,3 +178,57 @@ def insert_trigger_evaluations(
 
     with engine.begin() as conn:
         conn.execute(sql, rows)
+
+
+def fetch_trigger_history(
+    *,
+    user_id: str,
+    plugin: str,
+    from_date: date,
+    to_date: date,
+    trigger_type: str | None,
+    is_triggered: bool | None,
+    limit: int,
+    offset: int,
+) -> list[dict]:
+    """Fetch trigger evaluations for history endpoint."""
+    clauses = [
+        "user_id = :user_id",
+        "plugin = :plugin",
+        "as_of BETWEEN :from_date AND :to_date",
+    ]
+    params: dict[str, Any] = {
+        "user_id": user_id,
+        "plugin": plugin,
+        "from_date": from_date,
+        "to_date": to_date,
+        "limit": limit,
+        "offset": offset,
+    }
+
+    if trigger_type is not None:
+        clauses.append("trigger_type = :trigger_type")
+        params["trigger_type"] = trigger_type
+    if is_triggered is not None:
+        clauses.append("is_triggered = :is_triggered")
+        params["is_triggered"] = is_triggered
+
+    where_sql = " AND ".join(clauses)
+    sql = text(
+        f"""
+        SELECT as_of,
+               decision_inputs_hash,
+               trigger_key,
+               trigger_type,
+               is_triggered,
+               observed_value,
+               evaluated_at
+        FROM trigger_evaluations
+        WHERE {where_sql}
+        ORDER BY evaluated_at DESC, trigger_key ASC
+        LIMIT :limit OFFSET :offset
+        """
+    )
+    with engine.begin() as conn:
+        rows = conn.execute(sql, params).mappings().all()
+    return [dict(row) for row in rows]
