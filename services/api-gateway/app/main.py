@@ -373,6 +373,65 @@ async def proxy_portfolio_symbol_mappings_resolve(request: Request) -> Any:
         )
 
 
+@app.get("/portfolio/outcomes", tags=["portfolio"])
+async def proxy_portfolio_outcomes(request: Request) -> Any:
+    """轉發 decision outcomes 查詢到 Portfolio Service。"""
+    target_url = f"{PORTFOLIO_SERVICE_URL}/portfolio/outcomes"
+    try:
+        async with httpx.AsyncClient() as client:
+            response = await client.get(
+                target_url,
+                params=dict(request.query_params),
+                timeout=10.0,
+            )
+        return Response(
+            content=response.content,
+            status_code=response.status_code,
+            headers=dict(response.headers),
+            media_type="application/json",
+        )
+    except httpx.RequestError as e:
+        raise HTTPException(
+            status_code=503,
+            detail=f"無法連線到 Portfolio Service: {str(e)}",
+        )
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"轉發請求時發生錯誤: {str(e)}",
+        )
+
+
+@app.post("/portfolio/outcomes", tags=["portfolio"])
+async def proxy_portfolio_outcomes_upsert(request: Request) -> Any:
+    """轉發 decision outcomes upsert 到 Portfolio Service。"""
+    target_url = f"{PORTFOLIO_SERVICE_URL}/portfolio/outcomes"
+    try:
+        payload = await request.json()
+        async with httpx.AsyncClient() as client:
+            response = await client.post(
+                target_url,
+                json=payload,
+                timeout=10.0,
+            )
+        return Response(
+            content=response.content,
+            status_code=response.status_code,
+            headers=dict(response.headers),
+            media_type="application/json",
+        )
+    except httpx.RequestError as e:
+        raise HTTPException(
+            status_code=503,
+            detail=f"無法連線到 Portfolio Service: {str(e)}",
+        )
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"轉發請求時發生錯誤: {str(e)}",
+        )
+
+
 # ============================================================================
 # News Service 反向代理路由
 # ============================================================================

@@ -29,6 +29,12 @@ const newsLoading = ref(false);
 const decisionPackage = ref(null);
 const decisionError = ref("");
 const decisionLoading = ref(false);
+const decisionHistory = ref([]);
+const decisionHistoryError = ref("");
+const decisionHistoryLoading = ref(false);
+const outcomeMap = ref(new Map());
+const outcomeEditing = ref("");
+const outcomeDrafts = ref({});
 const holdings = ref([]);
 const positions = ref([]);
 const holdingsError = ref("");
@@ -69,6 +75,7 @@ const panels = ref({
   positions: true,
   mappings: true,
   decision: true,
+  decisionHistory: false,
   triggers: false,
   health: true,
 });
@@ -88,6 +95,100 @@ const decisionSummary = computed(() => {
   const score = decisionPackage.value.evidence?.news_context?.score_impact?.risk_off_score_added ?? 0;
   return `N1=${n1}、N3=${n3}，新聞風險分數影響 ${score}，融合後模式為 ${decisionPackage.value.mode}，決策為 ${decisionPackage.value.decision}。`;
 });
+
+const formatNotePreview = (text) => {
+  if (!text) {
+    return "-";
+  }
+  return text.length > 60 ? `${text.slice(0, 60)}...` : text;
+};
+
+const getOutcome = (hash) => outcomeMap.value.get(hash) || { outcome_label: "unknown", outcome_note: "" };
+
+const startOutcomeEdit = (row) => {
+  const hash = row.inputs_hash || "";
+  outcomeEditing.value = hash;
+  const current = getOutcome(hash);
+  outcomeDrafts.value[hash] = {
+    label: current.outcome_label || "unknown",
+    note: current.outcome_note || "",
+  };
+};
+
+const cancelOutcomeEdit = () => {
+  outcomeEditing.value = "";
+};
+
+const saveOutcome = async (row) => {
+  const hash = row.inputs_hash || "";
+  const draft = outcomeDrafts.value[hash];
+  if (!draft) {
+    return;
+  }
+  try {
+    const response = await fetch(`${API_BASE_URL}/portfolio/outcomes`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        user_id: USER_ID,
+        as_of: row.as_of,
+        plugin: "v1.4",
+        decision_inputs_hash: hash,
+        outcome_label: draft.label,
+        outcome_note: draft.note,
+      }),
+    });
+    if (!response.ok) {
+      throw new Error(`portfolio-service ${response.status}`);
+    }
+    const payload = await response.json();
+    const next = new Map(outcomeMap.value);
+    next.set(hash, payload);
+    outcomeMap.value = next;
+    outcomeEditing.value = "";
+  } catch (err) {
+    decisionHistoryError.value = err?.message || "api-gateway 連線失敗";
+  }
+};
+
+const fetchDecisionHistory = async () => {
+  decisionHistoryLoading.value = true;
+  decisionHistoryError.value = "";
+  try {
+    const url = `${API_BASE_URL}/radar/decisions/history?user_id=${USER_ID}&limit=20`;
+    const response = await fetch(url);
+    if (!response.ok) {
+      throw new Error(`radar-service ${response.status}`);
+    }
+    decisionHistory.value = await response.json();
+  } catch (err) {
+    decisionHistoryError.value = err?.message || "api-gateway 連線失敗";
+  } finally {
+    decisionHistoryLoading.value = false;
+  }
+};
+
+const fetchOutcomes = async () => {
+  const to = asOf.value;
+  const fromDate = new Date(to);
+  fromDate.setDate(fromDate.getDate() - 30);
+  const from = fromDate.toISOString().slice(0, 10);
+  try {
+    const url = `${API_BASE_URL}/portfolio/outcomes?user_id=${USER_ID}&plugin=v1.4&from=${from}&to=${to}&limit=200&offset=0`;
+    const response = await fetch(url);
+    if (!response.ok) {
+      throw new Error(`portfolio-service ${response.status}`);
+    }
+    const payload = await response.json();
+    const next = new Map();
+    (payload.items || []).forEach((item) => {
+      next.set(item.decision_inputs_hash, item);
+    });
+    outcomeMap.value = next;
+  } catch (err) {
+    decisionHistoryError.value = err?.message || "api-gateway 連線失敗";
+  }
+};
 
 const selectedCoreItems = computed(() =>
   holdings.value
@@ -423,8 +524,10 @@ const fetchAll = async () => {
     fetchDecisionPackage(),
     fetchHoldings(),
     fetchSymbolMappings(),
+    fetchDecisionHistory(),
     fetchTriggerHistory(),
   ]);
+  await fetchOutcomes();
 };
 
 onMounted(() => {
@@ -773,6 +876,69 @@ onMounted(() => {
       </div>
 
       <div v-else class="empty">尚未取得決策包</div>
+      </div>
+    </section>
+
+    <section class="panel">
+      <div class="panel-header">
+        <h2>Decision History + Outcome</h2>
+        <span class="badge">radar-service</span>
+        <button class="collapse-btn" type="button" @click="togglePanel('decisionHistory')">
+          {{ panels.decisionHistory ? "展開" : "收合" }}
+        </button>
+      </div>
+
+      <div v-show="!panels.decisionHistory">
+        <div v-if="decisionHistoryError" class="error">
+          {{ decisionHistoryError }}
+        </div>
+        <div v-else-if="decisionHistoryLoading" class="empty">讀取中...</div>
+        <div v-else-if="decisionHistory.length === 0" class="empty">尚無歷史紀錄</div>
+        <div v-else class="decision-history">
+          <div class="decision-row decision-header">
+            <span>as_of</span>
+            <span>mode</span>
+            <span>decision</span>
+            <span>inputs_hash</span>
+            <span>outcome</span>
+            <span>note</span>
+            <span>actions</span>
+          </div>
+          <template v-for="row in decisionHistory" :key="row.inputs_hash">
+            <div class="decision-row">
+              <span class="mono">{{ row.as_of }}</span>
+              <span class="pill">{{ row.mode }}</span>
+              <span class="pill pill-accent">{{ row.decision }}</span>
+              <span class="mono">{{ row.inputs_hash }}</span>
+              <span class="badge" :class="{ good: getOutcome(row.inputs_hash).outcome_label === 'win', neutral: getOutcome(row.inputs_hash).outcome_label !== 'win' }">
+                {{ getOutcome(row.inputs_hash).outcome_label }}
+              </span>
+              <span class="note">{{ formatNotePreview(getOutcome(row.inputs_hash).outcome_note) }}</span>
+              <span class="actions">
+                <button class="ghost" type="button" @click="startOutcomeEdit(row)">編輯</button>
+              </span>
+            </div>
+            <div v-if="outcomeEditing === row.inputs_hash" class="decision-edit">
+              <label>
+                <span>Outcome</span>
+                <select v-model="outcomeDrafts[row.inputs_hash].label">
+                  <option value="unknown">unknown</option>
+                  <option value="neutral">neutral</option>
+                  <option value="win">win</option>
+                  <option value="loss">loss</option>
+                </select>
+              </label>
+              <label class="wide">
+                <span>Note</span>
+                <textarea v-model="outcomeDrafts[row.inputs_hash].note" rows="3"></textarea>
+              </label>
+              <div class="edit-actions">
+                <button class="refresh" type="button" @click="saveOutcome(row)">Save</button>
+                <button class="ghost" type="button" @click="cancelOutcomeEdit">Cancel</button>
+              </div>
+            </div>
+          </template>
+        </div>
       </div>
     </section>
 
@@ -1177,6 +1343,79 @@ strong {
 
 .decision-card.wide {
   grid-column: 1 / -1;
+}
+
+.decision-history {
+  display: grid;
+  gap: 0.5rem;
+}
+
+.decision-row {
+  display: grid;
+  grid-template-columns: 120px 100px 120px minmax(0, 1.6fr) 120px minmax(0, 1fr) 120px;
+  gap: 0.75rem;
+  align-items: center;
+  padding: 0.6rem 0.75rem;
+  background: rgba(15, 23, 42, 0.7);
+  border: 1px solid rgba(148, 163, 184, 0.2);
+  border-radius: 12px;
+  font-size: 0.78rem;
+}
+
+.decision-header {
+  background: rgba(30, 41, 59, 0.9);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-size: 0.7rem;
+  color: #cbd5f5;
+}
+
+.decision-row .note {
+  color: #cbd5f5;
+}
+
+.decision-edit {
+  margin: 0.25rem 0 0.75rem;
+  padding: 0.75rem 1rem;
+  border-radius: 12px;
+  background: rgba(9, 14, 28, 0.9);
+  border: 1px solid rgba(148, 163, 184, 0.2);
+  display: grid;
+  gap: 0.75rem;
+}
+
+.decision-edit label {
+  display: grid;
+  gap: 0.35rem;
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: #94a3b8;
+}
+
+.decision-edit select,
+.decision-edit textarea {
+  padding: 0.5rem 0.6rem;
+  border-radius: 10px;
+  border: 1px solid rgba(148, 163, 184, 0.3);
+  background: rgba(15, 23, 42, 0.7);
+  color: #e2e8f0;
+}
+
+.decision-edit .wide {
+  grid-column: 1 / -1;
+}
+
+.edit-actions {
+  display: flex;
+  gap: 0.6rem;
+  justify-content: flex-end;
+}
+
+@media (max-width: 960px) {
+  .decision-row {
+    grid-template-columns: 1fr;
+  }
 }
 
 .section-title {

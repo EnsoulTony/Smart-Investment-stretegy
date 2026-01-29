@@ -7,6 +7,7 @@ from pydantic import BaseModel, Field, field_validator, ConfigDict
 from datetime import datetime
 from decimal import Decimal
 from typing import Optional, List
+from datetime import date
 
 
 class TradeRecord(BaseModel):
@@ -230,3 +231,27 @@ class SymbolMappingResolveRequest(BaseModel):
     symbol: str = Field(..., min_length=1)
     asset_ccy: Optional[str] = None
     market: Optional[str] = None
+
+
+class OutcomeUpsertRequest(BaseModel):
+    user_id: str = Field(..., min_length=1)
+    as_of: date
+    plugin: str = Field(..., min_length=1)
+    decision_inputs_hash: str = Field(..., min_length=1)
+    outcome_label: str = Field(..., min_length=1)
+    outcome_note: Optional[str] = None
+
+
+class OutcomeItem(BaseModel):
+    user_id: str
+    as_of: str
+    plugin: str
+    decision_inputs_hash: str
+    outcome_label: str
+    outcome_note: Optional[str] = None
+    created_at: Optional[str] = None
+    updated_at: Optional[str] = None
+
+
+class OutcomeListResponse(BaseModel):
+    items: List[OutcomeItem]

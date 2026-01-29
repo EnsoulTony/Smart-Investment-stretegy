@@ -16,6 +16,8 @@ from .schemas import (
     SymbolMappingsResponse,
     SymbolMappingUpsertRequest,
     SymbolMappingResolveRequest,
+    OutcomeUpsertRequest,
+    OutcomeListResponse,
 )
 
 from app.db import get_db, engine
@@ -30,9 +32,10 @@ from app.avg_cost_calculator import compute_avg_cost
 from app.core_holdings_service import CoreHoldingsService
 from app.repositories.symbol_name_mappings_repo import SymbolNameMappingsRepository
 from app.symbol_name_resolver import SymbolNameResolver
+from app.models_core import DecisionOutcome
 from collections import defaultdict
 from decimal import Decimal
-from datetime import date
+from datetime import date, datetime, timezone
 from .position_rebuilder import preview_rebuild
 
 SERVICE_NAME = os.getenv("SERVICE_NAME", "portfolio-service")
@@ -670,3 +673,98 @@ def resolve_symbol_mapping(
         "source": mapping.source if mapping else "resolved",
         "updated_at": mapping.updated_at.isoformat() if mapping and mapping.updated_at else None,
     }
+
+
+@app.post("/portfolio/outcomes", tags=["portfolio"])
+def upsert_decision_outcome(
+    payload: OutcomeUpsertRequest,
+    db: Session = Depends(get_db),
+):
+    outcome = (
+        db.query(DecisionOutcome)
+        .filter(
+            DecisionOutcome.user_id == payload.user_id,
+            DecisionOutcome.as_of == payload.as_of,
+            DecisionOutcome.plugin == payload.plugin,
+            DecisionOutcome.decision_inputs_hash == payload.decision_inputs_hash,
+        )
+        .one_or_none()
+    )
+    now = datetime.now(timezone.utc)
+    if outcome:
+        outcome.outcome_label = payload.outcome_label
+        outcome.outcome_note = payload.outcome_note
+        outcome.updated_at = now
+    else:
+        outcome = DecisionOutcome(
+            user_id=payload.user_id,
+            as_of=payload.as_of,
+            plugin=payload.plugin,
+            decision_inputs_hash=payload.decision_inputs_hash,
+            outcome_label=payload.outcome_label,
+            outcome_note=payload.outcome_note,
+            created_at=now,
+            updated_at=now,
+        )
+        db.add(outcome)
+    db.commit()
+    db.refresh(outcome)
+    return {
+        "user_id": outcome.user_id,
+        "as_of": outcome.as_of.isoformat(),
+        "plugin": outcome.plugin,
+        "decision_inputs_hash": outcome.decision_inputs_hash,
+        "outcome_label": outcome.outcome_label,
+        "outcome_note": outcome.outcome_note,
+        "created_at": outcome.created_at.isoformat() if outcome.created_at else None,
+        "updated_at": outcome.updated_at.isoformat() if outcome.updated_at else None,
+    }
+
+
+@app.get("/portfolio/outcomes", tags=["portfolio"], response_model=OutcomeListResponse)
+def list_decision_outcomes(
+    user_id: str = Query(..., min_length=1, description="使用者 ID"),
+    from_date: str = Query(..., alias="from", description="起始日期 (YYYY-MM-DD)"),
+    to_date: str = Query(..., alias="to", description="結束日期 (YYYY-MM-DD)"),
+    plugin: Optional[str] = Query(None, description="策略版本"),
+    limit: int = Query(200, ge=1, le=1000, description="回傳筆數上限"),
+    offset: int = Query(0, ge=0, description="偏移量"),
+    db: Session = Depends(get_db),
+):
+    try:
+        from_dt = date.fromisoformat(from_date)
+        to_dt = date.fromisoformat(to_date)
+    except ValueError:
+        raise HTTPException(
+            status_code=422,
+            detail="Invalid date format. Expected YYYY-MM-DD",
+        )
+
+    query = db.query(DecisionOutcome).filter(
+        DecisionOutcome.user_id == user_id,
+        DecisionOutcome.as_of >= from_dt,
+        DecisionOutcome.as_of <= to_dt,
+    )
+    if plugin:
+        query = query.filter(DecisionOutcome.plugin == plugin)
+
+    rows = (
+        query.order_by(DecisionOutcome.as_of.desc(), DecisionOutcome.updated_at.desc())
+        .limit(limit)
+        .offset(offset)
+        .all()
+    )
+    items = [
+        {
+            "user_id": row.user_id,
+            "as_of": row.as_of.isoformat(),
+            "plugin": row.plugin,
+            "decision_inputs_hash": row.decision_inputs_hash,
+            "outcome_label": row.outcome_label,
+            "outcome_note": row.outcome_note,
+            "created_at": row.created_at.isoformat() if row.created_at else None,
+            "updated_at": row.updated_at.isoformat() if row.updated_at else None,
+        }
+        for row in rows
+    ]
+    return {"items": items}

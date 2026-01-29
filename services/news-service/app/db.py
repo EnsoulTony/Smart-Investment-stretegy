@@ -3,7 +3,7 @@
 import json
 import os
 from datetime import date, datetime
-from typing import List, Dict, Tuple
+from typing import List, Dict, Tuple, Optional
 
 from sqlalchemy import create_engine, text
 
@@ -15,8 +15,10 @@ DATABASE_URL = os.getenv(
 engine = create_engine(DATABASE_URL)
 
 
-def _parse_published_date(published_at: str | None, as_of: str) -> date:
+def _parse_published_date(published_at: str | datetime | None, as_of: str) -> date:
     if published_at:
+        if isinstance(published_at, datetime):
+            return published_at.date()
         try:
             value = published_at.replace("Z", "+00:00")
             return datetime.fromisoformat(value).date()
@@ -137,3 +139,28 @@ def persist_news_signals(
                 total_inserted += len(rows)
 
     return total_inserted
+
+
+def fetch_recent_news_signals(
+    user_id: str,
+    limit: int = 10,
+    tier: Optional[str] = None,
+) -> List[Dict]:
+    """Fetch recent news_signals for fallback."""
+    where = "user_id = :user_id"
+    params: Dict = {"user_id": user_id, "limit": limit}
+    if tier:
+        where += " AND tier = :tier"
+        params["tier"] = tier
+    query = text(
+        f"""
+        SELECT item_id, title, summary_zh, published_at, source_url, tier
+        FROM public.news_signals
+        WHERE {where}
+        ORDER BY published_at DESC NULLS LAST, as_of DESC
+        LIMIT :limit
+        """
+    )
+    with engine.begin() as conn:
+        rows = conn.execute(query, params).mappings().all()
+    return [dict(row) for row in rows]

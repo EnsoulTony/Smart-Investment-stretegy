@@ -13,6 +13,7 @@ RUN pip install --no-cache-dir -r /tmp/base-requirements.txt -r /tmp/service-req
 
 COPY services/api-gateway/app /app/app
 COPY services/api-gateway/tests /app/tests
+COPY services/api-gateway/pytest.ini /app/pytest.ini
 
 ENV PORT=8000
 ENV SERVICE_NAME=api-gateway
