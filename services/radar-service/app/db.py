@@ -132,3 +132,49 @@ def build_news_inputs(signals: Iterable[dict]) -> list[dict]:
             }
         )
     return sorted(items, key=lambda x: x.get("hash") or "")
+
+
+def insert_trigger_evaluations(
+    *,
+    user_id: str,
+    as_of: date | str,
+    plugin: str,
+    decision_inputs_hash: str,
+    evaluations: Iterable[dict],
+) -> None:
+    """Insert trigger evaluations (idempotent)."""
+    if engine.dialect.name == "sqlite":
+        return
+    rows = []
+    for evaluation in evaluations:
+        rows.append(
+            {
+                "user_id": user_id,
+                "as_of": as_of.isoformat() if isinstance(as_of, date) else as_of,
+                "plugin": plugin,
+                "decision_inputs_hash": decision_inputs_hash,
+                "trigger_key": evaluation.get("trigger_key"),
+                "trigger_type": evaluation.get("trigger_type"),
+                "condition": json.dumps(evaluation.get("condition"), ensure_ascii=False),
+                "observed_value": json.dumps(evaluation.get("observed_value"), ensure_ascii=False),
+                "is_triggered": bool(evaluation.get("is_triggered")),
+            }
+        )
+
+    if not rows:
+        return
+
+    sql = text(
+        """
+        INSERT INTO trigger_evaluations
+          (user_id, as_of, plugin, decision_inputs_hash, trigger_key, trigger_type,
+           condition, observed_value, is_triggered)
+        VALUES
+          (:user_id, :as_of, :plugin, :decision_inputs_hash, :trigger_key, :trigger_type,
+           :condition, :observed_value, :is_triggered)
+        ON CONFLICT ON CONSTRAINT uq_trigger_eval_identity DO NOTHING
+        """
+    )
+
+    with engine.begin() as conn:
+        conn.execute(sql, rows)

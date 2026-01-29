@@ -16,6 +16,7 @@ from .db import (
     upsert_decision_snapshot,
     fetch_decision_history,
     build_news_inputs,
+    insert_trigger_evaluations,
 )
 from .news_fusion import (
     compute_news_score,
@@ -32,7 +33,9 @@ from .strategy_engine.schemas import (
     SymbolIndicator,
     RatioIndicator,
     SignalsInput,
+    FalsifiableTrigger,
 )
+from .utils.triggers import stable_trigger_key
 
 SERVICE_NAME = os.getenv("SERVICE_NAME", "radar-service")
 PORTFOLIO_BASE_URL = os.getenv("PORTFOLIO_BASE_URL", "http://portfolio-service:8001")
@@ -251,16 +254,28 @@ async def get_decision(
     n3_raw_triggers = []
     items_used = []
     for signal in news_signals:
-        items_used.append(signal.get("signal_id"))
         payload = signal.get("payload") or {}
+        tier = signal.get("tier") or payload.get("tier") or "N3"
         triggers = payload.get("falsifiable_triggers") or []
-        if signal.get("tier") == "N1":
+        items_used.append(
+            {
+                "item_id": signal.get("signal_id"),
+                "tier": tier,
+                "headline": payload.get("title") or payload.get("headline"),
+                "published_at": payload.get("published_at"),
+                "source": payload.get("source"),
+                "falsifiable_triggers": triggers,
+            }
+        )
+        if tier == "N1":
             n1_raw_triggers.extend(triggers)
         else:
             n3_raw_triggers.extend(triggers)
 
-    n1_triggers = build_triggers(n1_raw_triggers)
-    n3_triggers = build_triggers(n3_raw_triggers)
+    news_trigger_evaluations, news_trigger_observed = _build_news_trigger_evaluations(items_used)
+
+    n1_triggers = _enrich_news_triggers(build_triggers(n1_raw_triggers), "N1", news_trigger_observed)
+    n3_triggers = _enrich_news_triggers(build_triggers(n3_raw_triggers), "N3", news_trigger_observed)
 
     output.actions, watchlist_triggers = attach_news_triggers(
         output.actions, n1_triggers, n3_triggers
@@ -272,6 +287,8 @@ async def get_decision(
         output.evidence.notes.append(
             f"news_fusion: mode override {original_mode.value} -> {output.mode.value}"
         )
+
+    output.actions = _enrich_action_triggers(output.actions)
 
     output.evidence.news_context = {
         "tiers_count": {"N1": n1_count, "N3": n3_count},
@@ -302,8 +319,121 @@ async def get_decision(
             },
         )
 
+    try:
+        insert_trigger_evaluations(
+            user_id=user_id,
+            as_of=as_of_date,
+            plugin=plugin,
+            decision_inputs_hash=output.evidence.inputs_hash,
+            evaluations=news_trigger_evaluations,
+        )
+    except Exception as e:
+        raise HTTPException(
+            status_code=502,
+            detail={
+                "status": "upstream_error",
+                "service": "postgres",
+                "message": f"DB write failed: {str(e)}",
+            },
+        )
+
     # Return OutputSchema
     return JSONResponse(content=output.model_dump())
+
+
+def _extract_trigger_condition(trigger: dict) -> dict:
+    return {
+        "type": trigger.get("type"),
+        "name": trigger.get("name"),
+        "condition": trigger.get("condition"),
+        "value": trigger.get("value"),
+    }
+
+
+def _build_news_trigger_evaluations(items_used: list[dict]) -> tuple[list[dict], dict]:
+    evaluations = []
+    observed_by_key: dict[str, dict] = {}
+
+    for item in items_used:
+        tier = item.get("tier") or "N3"
+        observed_value = {
+            "headline": item.get("headline"),
+            "published_at": item.get("published_at"),
+            "source": item.get("source"),
+            "tier": tier,
+        }
+        if item.get("item_id"):
+            observed_value["item_id"] = item.get("item_id")
+
+        for trigger in item.get("falsifiable_triggers") or []:
+            condition = _extract_trigger_condition(trigger)
+            trigger_key = stable_trigger_key("news", tier, condition)
+            evaluations.append(
+                {
+                    "trigger_key": trigger_key,
+                    "trigger_type": "news",
+                    "condition": condition,
+                    "observed_value": observed_value,
+                    "is_triggered": True,
+                }
+            )
+            if trigger_key not in observed_by_key:
+                observed_by_key[trigger_key] = observed_value
+
+    return evaluations, observed_by_key
+
+
+def _enrich_news_triggers(
+    triggers: list[FalsifiableTrigger],
+    tier: str,
+    observed_by_key: dict,
+) -> list[FalsifiableTrigger]:
+    enriched = []
+    for trigger in triggers:
+        data = trigger.model_dump()
+        trigger_key = stable_trigger_key("news", tier, data)
+        observed_value = observed_by_key.get(trigger_key, {"tier": tier})
+        enriched.append(
+            FalsifiableTrigger.model_validate(
+                {
+                    **data,
+                    "trigger_key": trigger_key,
+                    "observed_value": observed_value,
+                    "is_triggered": True,
+                }
+            )
+        )
+    return enriched
+
+
+def _enrich_action_triggers(actions: list) -> list:
+    enriched_actions = []
+    for action in actions:
+        enriched_triggers = []
+        for trigger in action.falsifiable_triggers:
+            data = trigger.model_dump()
+            if (
+                "trigger_key" in data
+                and "observed_value" in data
+                and "is_triggered" in data
+            ):
+                enriched_triggers.append(trigger)
+                continue
+            trigger_type = data.get("type") or "unknown"
+            trigger_key = stable_trigger_key(trigger_type, "core", data)
+            enriched_triggers.append(
+                FalsifiableTrigger.model_validate(
+                    {
+                        **data,
+                        "trigger_key": trigger_key,
+                        "observed_value": data.get("observed_value") or {},
+                        "is_triggered": False,
+                    }
+                )
+            )
+        action.falsifiable_triggers = enriched_triggers
+        enriched_actions.append(action)
+    return enriched_actions
 
 
 def _transform_positions(positions_data: dict) -> list[PositionInput]:
