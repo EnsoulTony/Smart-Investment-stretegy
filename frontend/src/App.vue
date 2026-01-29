@@ -1280,11 +1280,12 @@ strong {
 .trigger-table {
   display: grid;
   gap: 0.4rem;
+  overflow-x: auto;
 }
 
 .trigger-row {
   display: grid;
-  grid-template-columns: 140px 110px minmax(160px, 1.8fr) 110px 110px minmax(180px, 1.4fr) minmax(200px, 1.2fr) 160px;
+  grid-template-columns: 140px 110px minmax(0, 1.6fr) 110px 110px minmax(0, 1.2fr) minmax(0, 1.2fr) 160px;
   gap: 0.75rem;
   align-items: center;
   padding: 0.6rem 0.75rem;
@@ -1292,6 +1293,12 @@ strong {
   border: 1px solid rgba(148, 163, 184, 0.2);
   border-radius: 12px;
   font-size: 0.78rem;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.trigger-row > span {
+  min-width: 0;
 }
 
 .trigger-header {
@@ -1354,6 +1361,7 @@ strong {
   border-radius: 12px;
   background: rgba(9, 14, 28, 0.9);
   border: 1px solid rgba(148, 163, 184, 0.2);
+  overflow-x: auto;
 }
 
 .detail-title {
