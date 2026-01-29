@@ -12,6 +12,7 @@ PORTFOLIO_BASE_URL = os.getenv("PORTFOLIO_BASE_URL", "http://portfolio-service:8
 DEFAULT_CORE_HOLDINGS = ["TSLA", "CCJ", "OXY", "TSM", "URA"]
 DEFAULT_NEWS_PER_SOURCE = int(os.getenv("NEWS_SOURCE_LIMIT", "10"))
 DEFAULT_TOTAL_NEWS_LIMIT = int(os.getenv("NEWS_TOTAL_LIMIT", "10"))
+EXTERNAL_NEWS_ENABLED = os.getenv("NEWS_EXTERNAL_ENABLED", "0").lower() in {"1", "true", "yes", "on"}
 
 
 def safe_str(value) -> str:
@@ -28,7 +29,7 @@ def fetch_core_holdings(user_id: str) -> List[str]:
         resp.raise_for_status()
         data = resp.json()
         symbols = data.get("symbols", []) if isinstance(data, dict) else []
-        normalized = [s.upper() for s in symbols]
+        normalized = [normalize_symbol(s) for s in symbols]
         if normalized:
             return normalized
     except Exception:
@@ -88,7 +89,14 @@ MARKET_MECH_KEYWORDS = [
 ]
 
 HUGE_SCALE_REGEX = re.compile(r"\b(\d+(\.\d+)?)(\s?)(GW|兆|十億|Billion|bn)\b", re.IGNORECASE)
-SYMBOL_REGEX = re.compile(r"\b[A-Z]{1,5}\b")
+SYMBOL_REGEX = re.compile(r"\b[A-Z]{1,5}\b|\b\d{4,6}\b")
+
+
+def normalize_symbol(symbol: str) -> str:
+    symbol = safe_str(symbol).upper()
+    if symbol.endswith(".TW") or symbol.endswith(".TWO"):
+        return symbol.split(".", 1)[0]
+    return symbol
 
 def fetch_positions_name_map(user_id: str) -> Dict[str, str]:
     """Build name -> symbol map from positions (symbol as English, name_zh as Chinese)."""
@@ -100,7 +108,7 @@ def fetch_positions_name_map(user_id: str) -> Dict[str, str]:
         data = resp.json()
         items = data.get("items", []) if isinstance(data, dict) else []
         for item in items:
-            symbol = safe_str(item.get("symbol", "")).upper()
+            symbol = normalize_symbol(item.get("symbol", ""))
             name_zh = safe_str(item.get("name_zh", ""))
             if symbol:
                 name_map[symbol] = symbol
@@ -173,8 +181,8 @@ def _is_ascii(text: str) -> bool:
 
 
 def extract_symbols(text: str, whitelist: List[str], name_map: Dict[str, str]) -> List[str]:
-    symbols = [match.group(0) for match in SYMBOL_REGEX.finditer(text)]
-    whitelist_set = {s.upper() for s in whitelist}
+    symbols = [normalize_symbol(match.group(0)) for match in SYMBOL_REGEX.finditer(text)]
+    whitelist_set = {normalize_symbol(s) for s in whitelist}
     filtered = [symbol for symbol in symbols if symbol in whitelist_set]
     # Expand by company names from positions
     if name_map:
@@ -216,7 +224,8 @@ def compute_n1_score(
         score += 3
     if HUGE_SCALE_REGEX.search(text):
         score += 3
-    if any(symbol in {s.upper() for s in core_holdings} for symbol in symbols):
+    core_set = {normalize_symbol(s) for s in core_holdings}
+    if any(symbol in core_set for symbol in symbols):
         score += 2
     if _match_market_mechanism(text):
         score += 2
@@ -230,7 +239,7 @@ def compute_n1_score(
                 matched = name.upper() in text_upper
             else:
                 matched = name in text
-            if matched and sym in {s.upper() for s in core_holdings}:
+            if matched and normalize_symbol(sym) in core_set:
                 score += 2
                 break
     return score
@@ -305,6 +314,10 @@ from datetime import datetime
 
 def fetch_external_news(as_of: str, per_source_limit: int = DEFAULT_NEWS_PER_SOURCE) -> List[NewsDraft]:
     import logging
+
+    if not EXTERNAL_NEWS_ENABLED:
+        return []
+
     news_items = []
     headers = {"User-Agent": "Mozilla/5.0"}
     chinese_sources = [
@@ -403,58 +416,9 @@ def fetch_external_news(as_of: str, per_source_limit: int = DEFAULT_NEWS_PER_SOU
     except Exception as e:
         logging.warning(f"Yahoo Finance fetch failed: {e}")
 
-    # fallback stub if all fail
+    # fallback: return empty if all fail
     if not news_items:
-        logging.warning("All external news fetch failed, using fallback stub news.")
-        fallback_drafts = [
-            NewsDraft(
-                id="stub-n1-rate-tariff",
-                title="FOMC 升息與關稅升溫，市場重新定價",
-                summary_zh="TSLA 與 OXY 受政策衝擊，殖利率走高。",
-                published_at=as_of + "T00:00:00Z",
-                source_url="https://example.com/fallback-n1-1",
-            ),
-            NewsDraft(
-                id="stub-n1-war-energy",
-                title="戰爭升溫推升油價飆升，能源股大跌",
-                summary_zh="OXY 與 URA 受供應中斷影響，WTI 逼近 90。",
-                published_at=as_of + "T00:00:00Z",
-                source_url="https://example.com/fallback-n1-2",
-            ),
-            NewsDraft(
-                id="stub-n3-ai-power",
-                title="資料中心擴張帶動電力需求",
-                summary_zh="AI 供電合約擴大，電網容量與 PPA 訂單增加。",
-                published_at=as_of + "T00:00:00Z",
-                source_url="https://example.com/fallback-n3-1",
-            ),
-            NewsDraft(
-                id="stub-n3-credit",
-                title="區域銀行流動性觀察",
-                summary_zh="市場關注信用危機與流動性危機風險。",
-                published_at=as_of + "T00:00:00Z",
-                source_url="https://example.com/fallback-n3-2",
-            ),
-            NewsDraft(
-                id="stub-n3-growth",
-                title="科技股回穩，投資人風險偏好回升",
-                summary_zh="TSM 相關供應鏈關注度升高，股價創新高。",
-                published_at=as_of + "T00:00:00Z",
-                source_url="https://example.com/fallback-n3-3",
-            ),
-        ]
-        desired = max(per_source_limit * 3, DEFAULT_TOTAL_NEWS_LIMIT)
-        # Repeat with unique ids to reach desired count
-        news_items = []
-        for i in range(desired):
-            base = fallback_drafts[i % len(fallback_drafts)]
-            news_items.append(NewsDraft(
-                id=f"{base.id}-{i+1}",
-                title=base.title,
-                summary_zh=base.summary_zh,
-                published_at=base.published_at,
-                source_url=base.source_url,
-            ))
+        logging.warning("All external news fetch failed, returning empty list.")
     return news_items
 
 

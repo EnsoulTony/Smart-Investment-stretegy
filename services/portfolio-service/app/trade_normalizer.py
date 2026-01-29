@@ -126,9 +126,11 @@ class TradeNormalizer:
           - 2位數字 → 補到4位 → xxxx.TW (如 52 → 0052.TW)
           - 3位數字 → 補到5位 → 0xxxx.TW (如 713 → 00713.TW)
           - 4位數字：
-            - 若以 9xxx/6xxx 開頭 → 補到5位（常見 ETF，如 9805→00965.TW）
-            - 否則保持4位 (如 1519 → 1519.TW)
-          - 5位數字 → 直接加 .TW (如 00713 → 00713.TW)
+            - 以 9xxx 開頭 → 補到6位（如 9805 → 009805.TW，避免少一個前導 0）
+            - 其他 → 保持4位 (如 1519 → 1519.TW)
+          - 5位數字：
+            - 以 09xxx 開頭 → 補到6位（如 09805 → 009805.TW）
+            - 其他 → 直接加 .TW (如 00713 → 00713.TW)
           - 6位數字 → 直接加 .TW (如 009812 → 009812.TW)
         - 若已含字母（如 00983A），直接加 .TW
         - 若已含 .TW，直接返回
@@ -164,31 +166,13 @@ class TradeNormalizer:
                 # 3位數字 → 補到5位（ETF，如 713 → 00713）
                 symbol_str = symbol_str.zfill(5)
             elif num_len == 4:
-                # 4位數字 → 判斷是否需要補到5位
-                # 常見 ETF 代號：9xxx (如 9805, 9812), 00xx
-                first_digit = symbol_str[0]
-                if first_digit == '0':
-                    # 以 0 開頭 → 補到5位（如 0052 但實際應該是 00052）
-                    symbol_str = symbol_str.zfill(5)
-                elif first_digit in ['6', '7', '8', '9']:
-                    # 6xxx, 7xxx, 8xxx, 9xxx → 可能是 ETF，補到5位
-                    # (如 9805 → 09805，但實際常見是 00xxxx，這裡簡化處理)
-                    # 更保險的做法：檢查是否為常見 ETF 範圍
-                    if first_digit == '9' and int(symbol_str) >= 9000:
-                        # 9xxx → 補到5位 (如 9805 → 09805)
-                        symbol_str = symbol_str.zfill(5)
-                    elif first_digit in ['6', '7', '8']:
-                        # 6xxx/7xxx/8xxx 一般為個股，保持4位
-                        pass
-                # 否則保持4位（一般個股，如 1519, 4979, 6442, 6789）
-            elif num_len == 5:
-                # 5位數字 → 檢查是否為 009XX 格式，需補到6位
-                if symbol_str.startswith("009"):
+                # 4位數字 → 僅針對 9xxx 做 6 位補零，避免少一個前導 0
+                if symbol_str.startswith("9"):
                     symbol_str = symbol_str.zfill(6)
-                elif symbol_str.startswith("0") and not symbol_str.startswith("00"):
-                    # 09xxx (如 09805) → 補到 00xxxx (如 009805)
-                    # 但這會變成6位，先檢查是否已經是 00xxx
-                    pass
+            elif num_len == 5:
+                # 5位數字 → 僅針對 09xxx 做 6 位補零
+                if symbol_str.startswith("09"):
+                    symbol_str = symbol_str.zfill(6)
             # 6位數字以上直接用
         
         # 加上 .TW 後綴

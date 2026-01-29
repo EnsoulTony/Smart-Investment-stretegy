@@ -13,7 +13,7 @@ from app.repositories.symbol_name_mappings_repo import SymbolNameMappingsReposit
 from app.utils import safe_str
 
 
-TW_SYMBOL_RE = re.compile(r"^\d{4,5}(\.TW|\.TWO)?$", re.IGNORECASE)
+TW_SYMBOL_RE = re.compile(r"^\d{4,6}(\.TW|\.TWO)?$", re.IGNORECASE)
 
 TWSE_LIST_URL = "https://openapi.twse.com.tw/v1/exchangeReport/STOCK_DAY_ALL"
 TPEX_LIST_URL = "https://www.tpex.org.tw/openapi/v1/tpex_mainboard_daily_close_quotes"

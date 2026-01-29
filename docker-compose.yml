@@ -118,6 +118,7 @@ services:
     environment:
       PORT: 8003
       SERVICE_NAME: news-service
+      NEWS_EXTERNAL_ENABLED: "1"
       DATABASE_URL: ${DATABASE_URL:-postgresql://investment:investment@postgres:5432/investment_db}
     depends_on:
     - postgres

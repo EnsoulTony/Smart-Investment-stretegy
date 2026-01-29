@@ -49,6 +49,18 @@ const mappingSource = ref("manual");
 const mappingResolving = ref(false);
 const mappingSaving = ref(false);
 const mappingsUpdatedAt = ref("");
+const panels = ref({
+  news: false,
+  coreHoldings: true,
+  positions: true,
+  mappings: true,
+  decision: true,
+  health: true,
+});
+
+const togglePanel = (key) => {
+  panels.value[key] = !panels.value[key];
+};
 
 const n1Items = computed(() => newsItems.value.filter((item) => item.tier === "N1"));
 const n3Items = computed(() => newsItems.value.filter((item) => item.tier === "N3"));
@@ -330,8 +342,12 @@ onMounted(fetchAll);
       <div class="panel-header">
         <h2>戰情室｜新聞訊號</h2>
         <span class="badge">news-service</span>
+        <button class="collapse-btn" type="button" @click="togglePanel('news')">
+          {{ panels.news ? "展開" : "收合" }}
+        </button>
       </div>
 
+      <div v-show="!panels.news">
       <div v-if="newsError" class="error">
         {{ newsError }}
       </div>
@@ -411,54 +427,60 @@ onMounted(fetchAll);
           </article>
         </div>
       </div>
+      </div>
     </section>
 
     <section class="panel">
       <div class="panel-header">
         <h2>編輯核心持股</h2>
         <span class="badge">portfolio-service</span>
+        <button class="collapse-btn" type="button" @click="togglePanel('coreHoldings')">
+          {{ panels.coreHoldings ? "展開" : "收合" }}
+        </button>
       </div>
 
-      <div v-if="holdingsError" class="error">
-        {{ holdingsError }}
-      </div>
+      <div v-show="!panels.coreHoldings">
+        <div v-if="holdingsError" class="error">
+          {{ holdingsError }}
+        </div>
 
-      <div v-else class="holdings-grid">
-        <div v-if="holdingsLoading" class="empty">讀取中...</div>
-        <div v-else-if="holdings.length === 0" class="empty">尚無持股清單</div>
-      <div v-else class="holdings-list">
-        <label v-for="item in holdings" :key="item.symbol" class="holding-item">
-          <input type="checkbox" v-model="item.selected" />
-          <span class="holding-symbol">{{ item.symbol }}</span>
-          <span class="holding-name">{{ item.name }}</span>
-        </label>
-      </div>
-      <p v-if="holdingsHint" class="hint">{{ holdingsHint }}</p>
-      <div class="holdings-actions">
-        <button class="refresh" type="button" @click="syncPortfolio" :disabled="holdingsSyncing">
-          {{ holdingsSyncing ? "同步中..." : "同步交易" }}
-        </button>
-        <span class="action-note">從交易來源匯入並補齊 name_zh</span>
-        <button
-          class="refresh"
-          type="button"
-          @click="rebuildPositions"
-          :disabled="holdingsRebuilding"
-        >
-          {{ holdingsRebuilding ? "重建中..." : "重建持股" }}
-        </button>
-        <span class="action-note">依 trades 重新計算 positions</span>
-        <button
-          class="refresh"
-          type="button"
-          @click="saveCoreHoldings"
-          :disabled="holdingsSaving || holdingsLoading || holdingsEmpty"
-        >
-          {{ holdingsSaving ? "儲存中..." : "儲存核心持股" }}
-        </button>
-        <span class="action-note">把勾選清單寫入 core_holdings</span>
-        <p class="timestamp" v-if="holdingsSavedAt">已儲存：{{ holdingsSavedAt }}</p>
-      </div>
+        <div v-else class="holdings-grid">
+          <div v-if="holdingsLoading" class="empty">讀取中...</div>
+          <div v-else-if="holdings.length === 0" class="empty">尚無持股清單</div>
+          <div v-else class="holdings-list">
+            <label v-for="item in holdings" :key="item.symbol" class="holding-item">
+              <input type="checkbox" v-model="item.selected" />
+              <span class="holding-symbol">{{ item.symbol }}</span>
+              <span class="holding-name">{{ item.name }}</span>
+            </label>
+          </div>
+          <p v-if="holdingsHint" class="hint">{{ holdingsHint }}</p>
+          <div class="holdings-actions">
+            <button class="refresh" type="button" @click="syncPortfolio" :disabled="holdingsSyncing">
+              {{ holdingsSyncing ? "同步中..." : "同步交易" }}
+            </button>
+            <span class="action-note">從交易來源匯入並補齊 name_zh</span>
+            <button
+              class="refresh"
+              type="button"
+              @click="rebuildPositions"
+              :disabled="holdingsRebuilding"
+            >
+              {{ holdingsRebuilding ? "重建中..." : "重建持股" }}
+            </button>
+            <span class="action-note">依 trades 重新計算 positions</span>
+            <button
+              class="refresh"
+              type="button"
+              @click="saveCoreHoldings"
+              :disabled="holdingsSaving || holdingsLoading || holdingsEmpty"
+            >
+              {{ holdingsSaving ? "儲存中..." : "儲存核心持股" }}
+            </button>
+            <span class="action-note">把勾選清單寫入 core_holdings</span>
+            <p class="timestamp" v-if="holdingsSavedAt">已儲存：{{ holdingsSavedAt }}</p>
+          </div>
+        </div>
       </div>
     </section>
 
@@ -466,30 +488,35 @@ onMounted(fetchAll);
       <div class="panel-header">
         <h2>持股明細</h2>
         <span class="badge">portfolio-service</span>
+        <button class="collapse-btn" type="button" @click="togglePanel('positions')">
+          {{ panels.positions ? "展開" : "收合" }}
+        </button>
       </div>
 
-      <div v-if="holdingsLoading" class="empty">讀取中...</div>
-      <div v-else-if="positions.length === 0" class="empty">尚無持股資料</div>
-      <div v-else class="positions-table">
-        <div class="positions-row positions-header">
-          <span>代碼</span>
-          <span>名稱</span>
-          <span>幣別</span>
-          <span class="number">數量</span>
-          <span class="number">均價</span>
-          <span class="number">成本</span>
-          <span class="number">已實現損益</span>
-        </div>
-        <div v-for="pos in positions" :key="pos.symbol" class="positions-row">
-          <span class="symbol">{{ pos.symbol }}</span>
-          <span>{{ pos.name_zh || '-' }}</span>
-          <span>{{ pos.asset_ccy }}</span>
-          <span class="number">{{ Number(pos.quantity).toLocaleString('zh-TW', { maximumFractionDigits: 4 }) }}</span>
-          <span class="number">{{ Number(pos.avg_cost).toLocaleString('zh-TW', { minimumFractionDigits: 2, maximumFractionDigits: 4 }) }}</span>
-          <span class="number">{{ Number(pos.cost_basis).toLocaleString('zh-TW', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) }}</span>
-          <span class="number" :class="{ positive: Number(pos.realized_pnl) > 0, negative: Number(pos.realized_pnl) < 0 }">
-            {{ Number(pos.realized_pnl).toLocaleString('zh-TW', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) }}
-          </span>
+      <div v-show="!panels.positions">
+        <div v-if="holdingsLoading" class="empty">讀取中...</div>
+        <div v-else-if="positions.length === 0" class="empty">尚無持股資料</div>
+        <div v-else class="positions-table">
+          <div class="positions-row positions-header">
+            <span>代碼</span>
+            <span>名稱</span>
+            <span>幣別</span>
+            <span class="number">數量</span>
+            <span class="number">均價</span>
+            <span class="number">成本</span>
+            <span class="number">已實現損益</span>
+          </div>
+          <div v-for="pos in positions" :key="pos.symbol" class="positions-row">
+            <span class="symbol">{{ pos.symbol }}</span>
+            <span>{{ pos.name_zh || '-' }}</span>
+            <span>{{ pos.asset_ccy }}</span>
+            <span class="number">{{ Number(pos.quantity).toLocaleString('zh-TW', { maximumFractionDigits: 4 }) }}</span>
+            <span class="number">{{ Number(pos.avg_cost).toLocaleString('zh-TW', { minimumFractionDigits: 2, maximumFractionDigits: 4 }) }}</span>
+            <span class="number">{{ Number(pos.cost_basis).toLocaleString('zh-TW', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) }}</span>
+            <span class="number" :class="{ positive: Number(pos.realized_pnl) > 0, negative: Number(pos.realized_pnl) < 0 }">
+              {{ Number(pos.realized_pnl).toLocaleString('zh-TW', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) }}
+            </span>
+          </div>
         </div>
       </div>
     </section>
@@ -498,55 +525,60 @@ onMounted(fetchAll);
       <div class="panel-header">
         <h2>資產中文名稱維護</h2>
         <span class="badge">portfolio-service</span>
+        <button class="collapse-btn" type="button" @click="togglePanel('mappings')">
+          {{ panels.mappings ? "展開" : "收合" }}
+        </button>
       </div>
 
-      <div v-if="mappingsError" class="error">
-        {{ mappingsError }}
-      </div>
-
-      <div class="mapping-form">
-        <label class="mapping-field">
-          <span>Symbol</span>
-          <input v-model="mappingSymbol" placeholder="例如：AAPL / 2330.TW" />
-        </label>
-        <label class="mapping-field">
-          <span>Market</span>
-          <select v-model="mappingMarket">
-            <option value="US">US</option>
-            <option value="TW">TW</option>
-          </select>
-        </label>
-        <label class="mapping-field">
-          <span>中文名稱</span>
-          <input v-model="mappingNameZh" placeholder="輸入中文名稱" />
-        </label>
-        <div class="holdings-actions">
-          <button class="refresh" type="button" @click="resolveSymbolMapping" :disabled="mappingResolving">
-            {{ mappingResolving ? "查詢中..." : "自動查詢" }}
-          </button>
-          <span class="action-note">用 symbol 查詢中文名稱</span>
-          <button class="refresh" type="button" @click="saveSymbolMapping" :disabled="mappingSaving">
-            {{ mappingSaving ? "儲存中..." : "儲存映射" }}
-          </button>
-          <span class="action-note">手動覆寫或補齊名稱</span>
-          <p class="timestamp" v-if="mappingsUpdatedAt">已更新：{{ mappingsUpdatedAt }}</p>
+      <div v-show="!panels.mappings">
+        <div v-if="mappingsError" class="error">
+          {{ mappingsError }}
         </div>
-      </div>
 
-      <div v-if="mappingsLoading" class="empty">讀取中...</div>
-      <div v-else-if="symbolMappings.length === 0" class="empty">尚無資料</div>
-      <div v-else class="mapping-table">
-        <div class="mapping-row mapping-header">
-          <span>Symbol</span>
-          <span>Market</span>
-          <span>中文名稱</span>
-          <span>來源</span>
+        <div class="mapping-form">
+          <label class="mapping-field">
+            <span>Symbol</span>
+            <input v-model="mappingSymbol" placeholder="例如：AAPL / 2330.TW" />
+          </label>
+          <label class="mapping-field">
+            <span>Market</span>
+            <select v-model="mappingMarket">
+              <option value="US">US</option>
+              <option value="TW">TW</option>
+            </select>
+          </label>
+          <label class="mapping-field">
+            <span>中文名稱</span>
+            <input v-model="mappingNameZh" placeholder="輸入中文名稱" />
+          </label>
+          <div class="holdings-actions">
+            <button class="refresh" type="button" @click="resolveSymbolMapping" :disabled="mappingResolving">
+              {{ mappingResolving ? "查詢中..." : "自動查詢" }}
+            </button>
+            <span class="action-note">用 symbol 查詢中文名稱</span>
+            <button class="refresh" type="button" @click="saveSymbolMapping" :disabled="mappingSaving">
+              {{ mappingSaving ? "儲存中..." : "儲存映射" }}
+            </button>
+            <span class="action-note">手動覆寫或補齊名稱</span>
+            <p class="timestamp" v-if="mappingsUpdatedAt">已更新：{{ mappingsUpdatedAt }}</p>
+          </div>
         </div>
-        <div v-for="row in symbolMappings" :key="`${row.symbol}-${row.market}`" class="mapping-row">
-          <span>{{ row.symbol }}</span>
-          <span>{{ row.market }}</span>
-          <span>{{ row.name_zh }}</span>
-          <span>{{ row.source }}</span>
+
+        <div v-if="mappingsLoading" class="empty">讀取中...</div>
+        <div v-else-if="symbolMappings.length === 0" class="empty">尚無資料</div>
+        <div v-else class="mapping-table">
+          <div class="mapping-row mapping-header">
+            <span>Symbol</span>
+            <span>Market</span>
+            <span>中文名稱</span>
+            <span>來源</span>
+          </div>
+          <div v-for="row in symbolMappings" :key="`${row.symbol}-${row.market}`" class="mapping-row">
+            <span>{{ row.symbol }}</span>
+            <span>{{ row.market }}</span>
+            <span>{{ row.name_zh }}</span>
+            <span>{{ row.source }}</span>
+          </div>
         </div>
       </div>
     </section>
@@ -555,8 +587,12 @@ onMounted(fetchAll);
       <div class="panel-header">
         <h2>戰情室｜融合決策包</h2>
         <span class="badge">radar-service</span>
+        <button class="collapse-btn" type="button" @click="togglePanel('decision')">
+          {{ panels.decision ? "展開" : "收合" }}
+        </button>
       </div>
 
+      <div v-show="!panels.decision">
       <div v-if="decisionError" class="error">
         {{ decisionError }}
       </div>
@@ -621,16 +657,24 @@ onMounted(fetchAll);
       </div>
 
       <div v-else class="empty">尚未取得決策包</div>
+      </div>
     </section>
 
     <section class="panel subtle">
-      <h2>健康檢查總覽</h2>
-      <ul>
-        <li v-for="item in healthMessages" :key="item.name">
-          <strong>{{ item.name }}</strong>
-          <span>{{ item.message }}</span>
-        </li>
-      </ul>
+      <div class="panel-header">
+        <h2>健康檢查總覽</h2>
+        <button class="collapse-btn" type="button" @click="togglePanel('health')">
+          {{ panels.health ? "展開" : "收合" }}
+        </button>
+      </div>
+      <div v-show="!panels.health">
+        <ul>
+          <li v-for="item in healthMessages" :key="item.name">
+            <strong>{{ item.name }}</strong>
+            <span>{{ item.message }}</span>
+          </li>
+        </ul>
+      </div>
     </section>
   </main>
 </template>
@@ -858,6 +902,20 @@ strong {
   background: rgba(148, 163, 184, 0.2);
   border-radius: 999px;
   color: #e2e8f0;
+}
+
+.collapse-btn {
+  font-size: 0.75rem;
+  padding: 0.35rem 0.7rem;
+  border-radius: 999px;
+  border: 1px solid rgba(148, 163, 184, 0.35);
+  background: rgba(15, 23, 42, 0.6);
+  color: #e2e8f0;
+  cursor: pointer;
+}
+
+.collapse-btn:hover {
+  border-color: rgba(226, 232, 240, 0.7);
 }
 
 .decision-grid {

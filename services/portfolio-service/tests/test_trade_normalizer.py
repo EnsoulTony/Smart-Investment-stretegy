@@ -21,6 +21,15 @@ os.environ.setdefault("SYMBOL_NAME_PROVIDER", "disabled")
 
 class TestTradeNormalizer:
     """測試 TradeNormalizer 類別。"""
+
+    def test_normalize_tw_symbol_keeps_source_length(self):
+        """台股代號不應因轉換而少前導 0。"""
+        normalizer = TradeNormalizer()
+
+        assert normalizer.normalize_tw_symbol("009805", "TWD") == "009805.TW"
+        assert normalizer.normalize_tw_symbol("009812", "TWD") == "009812.TW"
+        assert normalizer.normalize_tw_symbol(9805, "TWD") == "009805.TW"
+        assert normalizer.normalize_tw_symbol(9812, "TWD") == "009812.TW"
     
     def test_normalize_row_success(self):
         """測試標準化單列資料成功。"""
