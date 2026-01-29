@@ -49,12 +49,27 @@ const mappingSource = ref("manual");
 const mappingResolving = ref(false);
 const mappingSaving = ref(false);
 const mappingsUpdatedAt = ref("");
+const triggerItems = ref([]);
+const triggerLoading = ref(false);
+const triggerError = ref("");
+const triggerExpanded = ref(new Set());
+const triggerDrilldown = ref(new Set());
+const triggerFilters = ref({
+  from: "",
+  to: "",
+  plugin: "v1.4",
+  is_triggered: "all",
+  trigger_type: "all",
+  limit: 200,
+  offset: 0,
+});
 const panels = ref({
   news: false,
   coreHoldings: true,
   positions: true,
   mappings: true,
   decision: true,
+  triggers: false,
   health: true,
 });
 
@@ -83,6 +98,103 @@ const selectedCoreItems = computed(() =>
     })),
 );
 const holdingsEmpty = computed(() => holdings.value.length === 0);
+const triggerTypeOptions = ["all", "news", "indicator", "price", "time", "core", "unknown"];
+
+const triggerRowKey = (row, idx) =>
+  `${row.trigger_key || "trigger"}-${row.evaluated_at || "time"}-${idx}`;
+
+const toggleTriggerDetails = (rowKey) => {
+  const next = new Set(triggerExpanded.value);
+  if (next.has(rowKey)) {
+    next.delete(rowKey);
+  } else {
+    next.add(rowKey);
+  }
+  triggerExpanded.value = next;
+};
+
+const toggleTriggerDrilldown = (rowKey) => {
+  const next = new Set(triggerDrilldown.value);
+  if (next.has(rowKey)) {
+    next.delete(rowKey);
+  } else {
+    next.add(rowKey);
+  }
+  triggerDrilldown.value = next;
+};
+
+const formatObservedPreview = (value) => {
+  if (!value) {
+    return "-";
+  }
+  const text = JSON.stringify(value);
+  return text.length > 140 ? `${text.slice(0, 140)}...` : text;
+};
+
+const groupedByInputsHash = computed(() => {
+  const groups = new Map();
+  triggerItems.value.forEach((row) => {
+    const key = row.decision_inputs_hash || "unknown";
+    if (!groups.has(key)) {
+      groups.set(key, []);
+    }
+    groups.get(key).push(row);
+  });
+  return groups;
+});
+
+const copyHash = async (value) => {
+  if (!value) {
+    return;
+  }
+  try {
+    await navigator.clipboard.writeText(value);
+  } catch (err) {
+    console.warn("copy failed", err);
+  }
+};
+
+const initTriggerDates = () => {
+  const today = new Date();
+  const to = today.toISOString().slice(0, 10);
+  const fromDate = new Date(today);
+  fromDate.setDate(fromDate.getDate() - 30);
+  const from = fromDate.toISOString().slice(0, 10);
+  triggerFilters.value.from = from;
+  triggerFilters.value.to = to;
+};
+
+const fetchTriggerHistory = async () => {
+  triggerLoading.value = true;
+  triggerError.value = "";
+  try {
+    const params = new URLSearchParams({
+      user_id: USER_ID,
+      plugin: triggerFilters.value.plugin,
+      from: triggerFilters.value.from,
+      to: triggerFilters.value.to,
+      limit: String(triggerFilters.value.limit || 200),
+      offset: String(triggerFilters.value.offset || 0),
+    });
+    if (triggerFilters.value.is_triggered !== "all") {
+      params.set("is_triggered", triggerFilters.value.is_triggered);
+    }
+    if (triggerFilters.value.trigger_type !== "all") {
+      params.set("trigger_type", triggerFilters.value.trigger_type);
+    }
+    const url = `${API_BASE_URL}/radar/triggers/history?${params.toString()}`;
+    const response = await fetch(url);
+    if (!response.ok) {
+      throw new Error(`radar-service ${response.status}`);
+    }
+    const payload = await response.json();
+    triggerItems.value = payload.items || [];
+  } catch (err) {
+    triggerError.value = err?.message || "api-gateway 連線失敗";
+  } finally {
+    triggerLoading.value = false;
+  }
+};
 
 const fetchNewsSignals = async () => {
   newsLoading.value = true;
@@ -311,10 +423,14 @@ const fetchAll = async () => {
     fetchDecisionPackage(),
     fetchHoldings(),
     fetchSymbolMappings(),
+    fetchTriggerHistory(),
   ]);
 };
 
-onMounted(fetchAll);
+onMounted(() => {
+  initTriggerDates();
+  fetchAll();
+});
 </script>
 
 <template>
@@ -676,6 +792,132 @@ onMounted(fetchAll);
         </ul>
       </div>
     </section>
+    
+    <section class="panel">
+      <div class="panel-header">
+        <h2>Trigger Timeline</h2>
+        <span class="badge">radar-service</span>
+        <button class="collapse-btn" type="button" @click="togglePanel('triggers')">
+          {{ panels.triggers ? "展開" : "收合" }}
+        </button>
+      </div>
+
+      <div v-show="!panels.triggers">
+        <div class="trigger-filters">
+          <label>
+            <span>from</span>
+            <input type="date" v-model="triggerFilters.from" />
+          </label>
+          <label>
+            <span>to</span>
+            <input type="date" v-model="triggerFilters.to" />
+          </label>
+          <label>
+            <span>plugin</span>
+            <input v-model="triggerFilters.plugin" placeholder="v1.4" />
+          </label>
+          <label>
+            <span>is_triggered</span>
+            <select v-model="triggerFilters.is_triggered">
+              <option value="all">all</option>
+              <option value="true">true</option>
+              <option value="false">false</option>
+            </select>
+          </label>
+          <label>
+            <span>trigger_type</span>
+            <select v-model="triggerFilters.trigger_type">
+              <option v-for="option in triggerTypeOptions" :key="option" :value="option">
+                {{ option }}
+              </option>
+            </select>
+          </label>
+          <label>
+            <span>limit</span>
+            <input type="number" min="1" max="500" v-model.number="triggerFilters.limit" />
+          </label>
+          <button class="refresh" type="button" @click="fetchTriggerHistory" :disabled="triggerLoading">
+            {{ triggerLoading ? "查詢中..." : "查詢" }}
+          </button>
+        </div>
+
+        <div v-if="triggerError" class="error">
+          {{ triggerError }}
+        </div>
+
+        <div v-else-if="triggerLoading" class="empty">讀取中...</div>
+
+        <div v-else-if="triggerItems.length === 0" class="empty">尚無 triggers</div>
+
+        <div v-else class="trigger-table">
+          <div class="trigger-row trigger-header">
+            <span>evaluated_at</span>
+            <span>as_of</span>
+            <span>trigger_key</span>
+            <span>type</span>
+            <span>is_triggered</span>
+            <span>observed_value</span>
+            <span>decision_inputs_hash</span>
+            <span>actions</span>
+          </div>
+
+          <template v-for="(row, idx) in triggerItems" :key="triggerRowKey(row, idx)">
+            <div class="trigger-row">
+              <span class="mono">{{ row.evaluated_at }}</span>
+              <span class="mono">{{ row.as_of }}</span>
+              <span class="mono key">{{ row.trigger_key }}</span>
+              <span class="pill">{{ row.trigger_type }}</span>
+              <span class="badge" :class="{ good: row.is_triggered, neutral: !row.is_triggered }">
+                {{ row.is_triggered ? "true" : "false" }}
+              </span>
+              <span class="mono preview">{{ formatObservedPreview(row.observed_value) }}</span>
+              <span class="mono hash">
+                {{ row.decision_inputs_hash }}
+              </span>
+              <span class="actions">
+                <button type="button" class="ghost" @click="toggleTriggerDetails(triggerRowKey(row, idx))">
+                  {{ triggerExpanded.has(triggerRowKey(row, idx)) ? "收合" : "展開" }}
+                </button>
+                <button type="button" class="ghost" @click="toggleTriggerDrilldown(triggerRowKey(row, idx))">
+                  同批
+                </button>
+                <button type="button" class="ghost" @click="copyHash(row.decision_inputs_hash)">
+                  copy
+                </button>
+              </span>
+            </div>
+
+            <div
+              v-if="triggerExpanded.has(triggerRowKey(row, idx))"
+              class="trigger-detail"
+            >
+              <p class="detail-title">observed_value</p>
+              <pre class="code-block">{{ JSON.stringify(row.observed_value || {}, null, 2) }}</pre>
+            </div>
+
+            <div
+              v-if="triggerDrilldown.has(triggerRowKey(row, idx))"
+              class="trigger-detail"
+            >
+              <p class="detail-title">同 decision_inputs_hash 的 triggers</p>
+              <div class="drilldown-list">
+                <div
+                  v-for="(item, subIdx) in groupedByInputsHash.get(row.decision_inputs_hash) || []"
+                  :key="`${row.decision_inputs_hash}-${subIdx}`"
+                  class="drilldown-item"
+                >
+                  <span class="mono">{{ item.trigger_key }}</span>
+                  <span class="pill">{{ item.trigger_type }}</span>
+                  <span class="badge" :class="{ good: item.is_triggered, neutral: !item.is_triggered }">
+                    {{ item.is_triggered ? "true" : "false" }}
+                  </span>
+                </div>
+              </div>
+            </div>
+          </template>
+        </div>
+      </div>
+    </section>
   </main>
 </template>
 
@@ -1007,6 +1249,138 @@ strong {
   padding: 1rem;
   border-radius: 12px;
   overflow-x: auto;
+}
+
+.trigger-filters {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 0.75rem;
+  margin-bottom: 1rem;
+  align-items: end;
+}
+
+.trigger-filters label {
+  display: grid;
+  gap: 0.35rem;
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: #94a3b8;
+}
+
+.trigger-filters input,
+.trigger-filters select {
+  padding: 0.5rem 0.6rem;
+  border-radius: 10px;
+  border: 1px solid rgba(148, 163, 184, 0.3);
+  background: rgba(15, 23, 42, 0.7);
+  color: #e2e8f0;
+}
+
+.trigger-table {
+  display: grid;
+  gap: 0.4rem;
+}
+
+.trigger-row {
+  display: grid;
+  grid-template-columns: 140px 110px minmax(160px, 1.8fr) 110px 110px minmax(180px, 1.4fr) minmax(200px, 1.2fr) 160px;
+  gap: 0.75rem;
+  align-items: center;
+  padding: 0.6rem 0.75rem;
+  background: rgba(15, 23, 42, 0.7);
+  border: 1px solid rgba(148, 163, 184, 0.2);
+  border-radius: 12px;
+  font-size: 0.78rem;
+}
+
+.trigger-header {
+  background: rgba(30, 41, 59, 0.9);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-size: 0.7rem;
+  color: #cbd5f5;
+}
+
+.mono {
+  font-family: "JetBrains Mono", "Fira Code", monospace;
+  word-break: break-all;
+}
+
+.trigger-row .key {
+  color: #93c5fd;
+}
+
+.trigger-row .preview {
+  color: #cbd5f5;
+}
+
+.trigger-row .hash {
+  color: #a5b4fc;
+}
+
+.trigger-row .actions {
+  display: flex;
+  gap: 0.4rem;
+}
+
+.ghost {
+  border: 1px solid rgba(148, 163, 184, 0.4);
+  background: transparent;
+  color: #e2e8f0;
+  padding: 0.25rem 0.5rem;
+  border-radius: 8px;
+  font-size: 0.7rem;
+  cursor: pointer;
+}
+
+.ghost:hover {
+  border-color: rgba(148, 163, 184, 0.8);
+}
+
+.badge.good {
+  background: rgba(34, 197, 94, 0.2);
+  color: #86efac;
+}
+
+.badge.neutral {
+  background: rgba(148, 163, 184, 0.2);
+  color: #e2e8f0;
+}
+
+.trigger-detail {
+  margin: 0.25rem 0 0.75rem;
+  padding: 0.75rem 1rem;
+  border-radius: 12px;
+  background: rgba(9, 14, 28, 0.9);
+  border: 1px solid rgba(148, 163, 184, 0.2);
+}
+
+.detail-title {
+  margin: 0 0 0.5rem;
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  color: #7dd3fc;
+}
+
+.drilldown-list {
+  display: grid;
+  gap: 0.5rem;
+}
+
+.drilldown-item {
+  display: flex;
+  gap: 0.6rem;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+@media (max-width: 960px) {
+  .trigger-row {
+    grid-template-columns: 1fr;
+    gap: 0.35rem;
+  }
 }
 
 .action-grid {

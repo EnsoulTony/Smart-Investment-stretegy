@@ -466,3 +466,32 @@ async def proxy_radar_decisions_history(request: Request) -> Any:
             status_code=500,
             detail=f"轉發請求時發生錯誤: {str(e)}",
         )
+
+
+@app.get("/radar/triggers/history", tags=["radar"])
+async def proxy_radar_triggers_history(request: Request) -> Any:
+    """轉發雷達 trigger history 請求到 Radar Service。"""
+    target_url = f"{RADAR_SERVICE_URL}/radar/triggers/history"
+    try:
+        async with httpx.AsyncClient() as client:
+            response = await client.get(
+                target_url,
+                params=dict(request.query_params),
+                timeout=10.0,
+            )
+        return Response(
+            content=response.content,
+            status_code=response.status_code,
+            headers=dict(response.headers),
+            media_type="application/json",
+        )
+    except httpx.RequestError as e:
+        raise HTTPException(
+            status_code=503,
+            detail=f"無法連線到 Radar Service: {str(e)}",
+        )
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"轉發請求時發生錯誤: {str(e)}",
+        )
