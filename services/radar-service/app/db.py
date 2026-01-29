@@ -255,6 +255,221 @@ def _normalize_analytics_rows(rows: list[dict]) -> list[dict]:
     return normalized
 
 
+def _tier_expr() -> str:
+    return (
+        "CASE "
+        "WHEN COALESCE((ds.payload->'evidence'->'news_context'->'tiers_count'->>'N1')::int, 0) > 0 THEN 'N1' "
+        "WHEN COALESCE((ds.payload->'evidence'->'news_context'->'tiers_count'->>'N3')::int, 0) > 0 THEN 'N3' "
+        "ELSE 'unknown' "
+        "END"
+    )
+
+
+def fetch_coverage_analytics(
+    *,
+    user_id: str,
+    plugin: str,
+    from_date: date,
+    to_date: date,
+) -> dict:
+    total_sql = text(
+        """
+        SELECT COUNT(*) AS total_decisions
+        FROM decision_snapshots
+        WHERE user_id = :user_id
+          AND plugin = :plugin
+          AND as_of BETWEEN :from_date AND :to_date
+        """
+    )
+    labeled_sql = text(
+        """
+        SELECT
+          COUNT(outcomes.id) AS labeled_decisions,
+          COALESCE(AVG(EXTRACT(EPOCH FROM (outcomes.labeled_at - ds.created_at))), 0) AS avg_label_delay_seconds,
+          COALESCE(
+            PERCENTILE_CONT(0.95) WITHIN GROUP (ORDER BY EXTRACT(EPOCH FROM (outcomes.labeled_at - ds.created_at))),
+            0
+          ) AS label_delay_p95_seconds
+        FROM decision_outcomes outcomes
+        JOIN decision_snapshots ds
+          ON ds.user_id = outcomes.user_id
+         AND ds.as_of = outcomes.as_of
+         AND ds.plugin = outcomes.plugin
+         AND ds.inputs_hash = outcomes.decision_inputs_hash
+        WHERE outcomes.user_id = :user_id
+          AND outcomes.plugin = :plugin
+          AND outcomes.as_of BETWEEN :from_date AND :to_date
+          AND lower(outcomes.outcome_label) IN ('win', 'loss', 'neutral')
+        """
+    )
+    dup_sql = text(
+        """
+        SELECT COUNT(*) AS duplicated_decisions
+        FROM (
+          SELECT outcomes.as_of
+          FROM decision_outcomes outcomes
+          WHERE outcomes.user_id = :user_id
+            AND outcomes.plugin = :plugin
+            AND outcomes.as_of BETWEEN :from_date AND :to_date
+          GROUP BY outcomes.as_of
+          HAVING COUNT(DISTINCT outcomes.decision_inputs_hash) > 1
+        ) AS dup
+        """
+    )
+    params = {
+        "user_id": user_id,
+        "plugin": plugin,
+        "from_date": from_date,
+        "to_date": to_date,
+    }
+    with engine.begin() as conn:
+        total_decisions = int(conn.execute(total_sql, params).scalar() or 0)
+        labeled_row = conn.execute(labeled_sql, params).mappings().first() or {}
+        duplicated_decisions = int(conn.execute(dup_sql, params).scalar() or 0)
+
+    labeled_decisions = int(labeled_row.get("labeled_decisions") or 0)
+    avg_delay = float(labeled_row.get("avg_label_delay_seconds") or 0)
+    p95_delay = float(labeled_row.get("label_delay_p95_seconds") or 0)
+
+    coverage_rate = labeled_decisions / total_decisions if total_decisions else 0.0
+    unknown_rate = (
+        (total_decisions - labeled_decisions) / total_decisions if total_decisions else 0.0
+    )
+    duplicated_rate = (
+        duplicated_decisions / total_decisions if total_decisions else 0.0
+    )
+
+    return {
+        "total_decisions": total_decisions,
+        "labeled_decisions": labeled_decisions,
+        "coverage_rate": coverage_rate,
+        "unknown_rate": unknown_rate,
+        "avg_label_delay_seconds": avg_delay,
+        "label_delay_p95_seconds": p95_delay,
+        "duplicated_decision_rate": duplicated_rate,
+    }
+
+
+def fetch_trigger_attribution(
+    *,
+    user_id: str,
+    plugin: str,
+    from_date: date,
+    to_date: date,
+    labeled_only: bool,
+    only_triggered: bool,
+) -> list[dict]:
+    clauses = [
+        "te.user_id = :user_id",
+        "te.plugin = :plugin",
+        "te.as_of BETWEEN :from_date AND :to_date",
+    ]
+    if only_triggered:
+        clauses.append("te.is_triggered = TRUE")
+    join_sql = "LEFT JOIN decision_outcomes outcomes"
+    if labeled_only:
+        join_sql = "JOIN decision_outcomes outcomes"
+        clauses.append("lower(outcomes.outcome_label) IN ('win', 'loss', 'neutral')")
+
+    where_sql = " AND ".join(clauses)
+    sql = text(
+        f"""
+        SELECT
+          te.trigger_key AS trigger_key,
+          COUNT(*) AS total,
+          SUM(CASE WHEN lower(outcomes.outcome_label) = 'win' THEN 1 ELSE 0 END) AS wins,
+          SUM(CASE WHEN lower(outcomes.outcome_label) = 'loss' THEN 1 ELSE 0 END) AS losses,
+          SUM(CASE WHEN lower(outcomes.outcome_label) = 'neutral' THEN 1 ELSE 0 END) AS neutral,
+          SUM(
+            CASE
+              WHEN outcomes.outcome_label IS NULL
+                OR lower(outcomes.outcome_label) NOT IN ('win', 'loss', 'neutral')
+              THEN 1
+              ELSE 0
+            END
+          ) AS unknown
+        FROM trigger_evaluations te
+        {join_sql}
+          ON outcomes.user_id = te.user_id
+         AND outcomes.as_of = te.as_of
+         AND outcomes.plugin = te.plugin
+         AND outcomes.decision_inputs_hash = te.decision_inputs_hash
+        WHERE {where_sql}
+        GROUP BY te.trigger_key
+        """
+    )
+    with engine.begin() as conn:
+        rows = conn.execute(
+            sql,
+            {
+                "user_id": user_id,
+                "plugin": plugin,
+                "from_date": from_date,
+                "to_date": to_date,
+            },
+        ).mappings().all()
+    return _normalize_analytics_rows([dict(row) for row in rows])
+
+
+def fetch_tier_attribution(
+    *,
+    user_id: str,
+    plugin: str,
+    from_date: date,
+    to_date: date,
+    labeled_only: bool,
+) -> list[dict]:
+    tier_expr = _tier_expr()
+    clauses = [
+        "ds.user_id = :user_id",
+        "ds.plugin = :plugin",
+        "ds.as_of BETWEEN :from_date AND :to_date",
+    ]
+    join_sql = "LEFT JOIN decision_outcomes outcomes"
+    if labeled_only:
+        join_sql = "JOIN decision_outcomes outcomes"
+        clauses.append("lower(outcomes.outcome_label) IN ('win', 'loss', 'neutral')")
+
+    where_sql = " AND ".join(clauses)
+    sql = text(
+        f"""
+        SELECT
+          {tier_expr} AS tier,
+          COUNT(*) AS total,
+          SUM(CASE WHEN lower(outcomes.outcome_label) = 'win' THEN 1 ELSE 0 END) AS wins,
+          SUM(CASE WHEN lower(outcomes.outcome_label) = 'loss' THEN 1 ELSE 0 END) AS losses,
+          SUM(CASE WHEN lower(outcomes.outcome_label) = 'neutral' THEN 1 ELSE 0 END) AS neutral,
+          SUM(
+            CASE
+              WHEN outcomes.outcome_label IS NULL
+                OR lower(outcomes.outcome_label) NOT IN ('win', 'loss', 'neutral')
+              THEN 1
+              ELSE 0
+            END
+          ) AS unknown
+        FROM decision_snapshots ds
+        {join_sql}
+          ON outcomes.user_id = ds.user_id
+         AND outcomes.as_of = ds.as_of
+         AND outcomes.plugin = ds.plugin
+         AND outcomes.decision_inputs_hash = ds.inputs_hash
+        WHERE {where_sql}
+        GROUP BY {tier_expr}
+        """
+    )
+    with engine.begin() as conn:
+        rows = conn.execute(
+            sql,
+            {
+                "user_id": user_id,
+                "plugin": plugin,
+                "from_date": from_date,
+                "to_date": to_date,
+            },
+        ).mappings().all()
+    return _normalize_analytics_rows([dict(row) for row in rows])
+
+
 def fetch_trigger_analytics(
     *,
     user_id: str,

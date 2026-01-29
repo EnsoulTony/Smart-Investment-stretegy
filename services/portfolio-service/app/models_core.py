@@ -46,6 +46,8 @@ class DecisionOutcome(Base):
     decision_inputs_hash = Column(Text, nullable=False)
     outcome_label = Column(Text, nullable=False, default="unknown")
     outcome_note = Column(Text, nullable=True)
+    labeled_at = Column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc))
+    horizon = Column(Text, nullable=False, default="D1")
     created_at = Column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc))
     updated_at = Column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc))
 

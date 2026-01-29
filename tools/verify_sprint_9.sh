@@ -31,7 +31,7 @@ echo
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "${ROOT_DIR}"
 
-step() { echo; echo "[$1/8] $2"; }
+step() { echo; echo "[$1/9] $2"; }
 
 need_cmd() {
   command -v "$1" >/dev/null 2>&1 || {
@@ -71,6 +71,9 @@ step "2" "Running DB migrations (portfolio/news/radar)..."
 ./dc.sh exec -T news-service alembic upgrade head >/dev/null
 ./dc.sh exec -T radar-service alembic upgrade head >/dev/null
 echo "  ✓ migrations complete"
+./dc.sh exec -T ${POSTGRES_SVC} psql -U ${DB_USER} -d ${DB_NAME} -tAc \
+  "delete from decision_outcomes where user_id='${USER_ID}' and plugin='${PLUGIN}' and as_of between '2026-01-26' and '2026-01-28';" >/dev/null
+echo "  ✓ outcomes cleared (2026-01-26..28)"
 
 step "3" "Seeding news_signals (2026-01-26/27/28)..."
 wait_http_200 "http://localhost:${NEWS_PORT}/health" "news-service"
@@ -100,7 +103,7 @@ for DATE in 2026-01-26 2026-01-27 2026-01-28; do
   echo "  ✓ inputs_hash[${DATE}]=${INPUTS_HASH}"
 done
 
-step "5" "POST /portfolio/outcomes (win/loss/neutral)..."
+step "5" "POST /portfolio/outcomes (win/loss)..."
 post_outcome() {
   local as_of="$1"
   local label="$2"
@@ -115,24 +118,35 @@ post_outcome() {
 
 post_outcome "2026-01-26" "win" "${INPUTS_HASH_BY_DATE["2026-01-26"]}"
 post_outcome "2026-01-27" "loss" "${INPUTS_HASH_BY_DATE["2026-01-27"]}"
-post_outcome "2026-01-28" "neutral" "${INPUTS_HASH_BY_DATE["2026-01-28"]}"
 
-step "6" "GET /radar/analytics/triggers..."
-TRIGGER_ANALYTICS="$(curl -sf "http://localhost:${RADAR_PORT}/radar/analytics/triggers?user_id=${USER_ID}&plugin=${PLUGIN}&from=2026-01-26&to=2026-01-28&only_triggered=true")"
-echo "$TRIGGER_ANALYTICS" | jq -e '.items|length >= 1' >/dev/null
-echo "$TRIGGER_ANALYTICS" | jq -e 'all(.items[]; (.wins + .losses + .neutral + .unknown) == .total)' >/dev/null
-echo "  ✓ trigger analytics OK"
+step "6" "GET /radar/analytics/coverage..."
+COVERAGE="$(curl -sf "http://localhost:${RADAR_PORT}/radar/analytics/coverage?user_id=${USER_ID}&plugin=${PLUGIN}&from=2026-01-26&to=2026-01-28")"
+echo "$COVERAGE" | jq -e '.total_decisions == 3' >/dev/null
+echo "$COVERAGE" | jq -e '.labeled_decisions == 2' >/dev/null
+echo "$COVERAGE" | jq -e '.coverage_rate > 0.66 and .coverage_rate < 0.67' >/dev/null
+echo "$COVERAGE" | jq -e '.unknown_rate > 0.33 and .unknown_rate < 0.34' >/dev/null
+echo "$COVERAGE" | jq -e '(.avg_label_delay_seconds|type=="number") and (.label_delay_p95_seconds|type=="number")' >/dev/null
+echo "  ✓ coverage analytics OK"
 
-step "7" "GET /radar/analytics/decisions..."
-DECISION_ANALYTICS="$(curl -sf "http://localhost:${RADAR_PORT}/radar/analytics/decisions?user_id=${USER_ID}&plugin=${PLUGIN}&from=2026-01-26&to=2026-01-28&group_by=decision")"
-echo "$DECISION_ANALYTICS" | jq -e '.items|length >= 1' >/dev/null
-echo "$DECISION_ANALYTICS" | jq -e 'all(.items[]; (.wins + .losses + .neutral + .unknown) == .total)' >/dev/null
-echo "  ✓ decision analytics OK"
+step "7" "GET /radar/analytics/attribution/triggers (labeled_only=true)..."
+TRIGGER_LABELED="$(curl -sf "http://localhost:${RADAR_PORT}/radar/analytics/attribution/triggers?user_id=${USER_ID}&plugin=${PLUGIN}&from=2026-01-26&to=2026-01-28&labeled_only=true&only_triggered=true")"
+echo "$TRIGGER_LABELED" | jq -e '.items|length >= 1' >/dev/null
+echo "$TRIGGER_LABELED" | jq -e 'all(.items[]; .unknown == 0)' >/dev/null
+echo "$TRIGGER_LABELED" | jq -e 'all(.items[]; (.wins + .losses + .neutral) == .total)' >/dev/null
+echo "  ✓ trigger attribution (labeled) OK"
 
-step "8" "Checking frontend marker..."
+step "8" "GET /radar/analytics/attribution/triggers (labeled_only=false)..."
+TRIGGER_ALL="$(curl -sf "http://localhost:${RADAR_PORT}/radar/analytics/attribution/triggers?user_id=${USER_ID}&plugin=${PLUGIN}&from=2026-01-26&to=2026-01-28&labeled_only=false&only_triggered=true")"
+echo "$TRIGGER_ALL" | jq -e '.items|length >= 1' >/dev/null
+echo "$TRIGGER_ALL" | jq -e '[.items[].unknown] | add > 0' >/dev/null
+echo "  ✓ trigger attribution (all) OK"
+
+step "9" "Checking frontend marker..."
 curl -sI "http://localhost:8080" | head -n 3 >/dev/null
-if curl -s "http://localhost:8080" | grep -q "Outcome Analytics"; then
+HTML="$(curl -s "http://localhost:8080")"
+if echo "$HTML" | grep -q "Outcome Analytics" && echo "$HTML" | grep -q "coverage-rate"; then
   echo "  ✓ Outcome Analytics marker found"
+  echo "  ✓ coverage-rate marker found"
 else
   echo "  ✗ Outcome Analytics marker missing"
   exit 1

@@ -1,5 +1,5 @@
 <script setup>
-import { computed, onMounted, ref, watch } from "vue";
+import { computed, onMounted, ref } from "vue";
 import { formatHealthStatus } from "./lib/health";
 
 // 以靜態列表描述目前的服務骨架，後續可改為即時輪詢。
@@ -35,11 +35,12 @@ const decisionHistoryLoading = ref(false);
 const outcomeMap = ref(new Map());
 const outcomeEditing = ref("");
 const outcomeDrafts = ref({});
-const analyticsTriggers = ref([]);
-const analyticsDecisions = ref([]);
+const coverage = ref(null);
+const attributionTriggers = ref([]);
+const attributionTiers = ref([]);
 const analyticsLoading = ref(false);
 const analyticsError = ref("");
-const decisionAnalyticsGroup = ref("tier");
+const errorLogs = ref([]);
 const holdings = ref([]);
 const positions = ref([]);
 const holdingsError = ref("");
@@ -82,6 +83,7 @@ const panels = ref({
   decision: true,
   decisionHistory: false,
   analytics: false,
+  errorLog: false,
   triggers: false,
   health: true,
 });
@@ -118,6 +120,21 @@ const formatRate = (value) => {
     return "-";
   }
   return `${(rate * 100).toFixed(1)}%`;
+};
+
+const addErrorLog = (source, err) => {
+  const message = err?.message || String(err) || "unknown error";
+  const entry = {
+    id: `${Date.now()}-${Math.random().toString(16).slice(2, 8)}`,
+    time: new Date().toLocaleString("zh-TW"),
+    source,
+    message,
+  };
+  errorLogs.value = [entry, ...errorLogs.value].slice(0, 50);
+};
+
+const clearErrorLogs = () => {
+  errorLogs.value = [];
 };
 
 const getOutcome = (hash) => outcomeMap.value.get(hash) || { outcome_label: "unknown", outcome_note: "" };
@@ -165,6 +182,7 @@ const saveOutcome = async (row) => {
     outcomeEditing.value = "";
   } catch (err) {
     decisionHistoryError.value = err?.message || "api-gateway 連線失敗";
+    addErrorLog("portfolio/outcomes", err);
   }
 };
 
@@ -180,6 +198,7 @@ const fetchDecisionHistory = async () => {
     decisionHistory.value = await response.json();
   } catch (err) {
     decisionHistoryError.value = err?.message || "api-gateway 連線失敗";
+    addErrorLog("radar/decisions/history", err);
   } finally {
     decisionHistoryLoading.value = false;
   }
@@ -204,11 +223,12 @@ const fetchOutcomes = async () => {
     outcomeMap.value = next;
   } catch (err) {
     decisionHistoryError.value = err?.message || "api-gateway 連線失敗";
+    addErrorLog("portfolio/outcomes list", err);
   }
 };
 
 const sortedTriggerAnalytics = computed(() => {
-  return [...analyticsTriggers.value].sort((a, b) => {
+  return [...attributionTriggers.value].sort((a, b) => {
     const rateDiff = (Number(b.win_rate) || 0) - (Number(a.win_rate) || 0);
     if (rateDiff !== 0) {
       return rateDiff;
@@ -217,8 +237,8 @@ const sortedTriggerAnalytics = computed(() => {
   });
 });
 
-const sortedDecisionAnalytics = computed(() => {
-  return [...analyticsDecisions.value].sort((a, b) => {
+const sortedTierAnalytics = computed(() => {
+  return [...attributionTiers.value].sort((a, b) => {
     const rateDiff = (Number(b.win_rate) || 0) - (Number(a.win_rate) || 0);
     if (rateDiff !== 0) {
       return rateDiff;
@@ -228,7 +248,7 @@ const sortedDecisionAnalytics = computed(() => {
 });
 
 const suspiciousTriggers = computed(() => {
-  const scored = analyticsTriggers.value
+  const scored = attributionTriggers.value
     .map((row) => {
       const total = Number(row.total) || 0;
       const losses = Number(row.losses) || 0;
@@ -246,6 +266,17 @@ const suspiciousTriggers = computed(() => {
   return scored.slice(0, 3);
 });
 
+const formatSeconds = (value) => {
+  if (value === null || value === undefined) {
+    return "-";
+  }
+  const seconds = Number(value);
+  if (Number.isNaN(seconds)) {
+    return "-";
+  }
+  return `${Math.round(seconds)}s`;
+};
+
 const fetchOutcomeAnalytics = async () => {
   analyticsLoading.value = true;
   analyticsError.value = "";
@@ -254,44 +285,53 @@ const fetchOutcomeAnalytics = async () => {
     const fromDate = new Date(to);
     fromDate.setDate(fromDate.getDate() - 30);
     const from = fromDate.toISOString().slice(0, 10);
+    const coverageParams = new URLSearchParams({
+      user_id: USER_ID,
+      plugin: "v1.4",
+      from,
+      to,
+    });
     const triggerParams = new URLSearchParams({
       user_id: USER_ID,
       plugin: "v1.4",
       from,
       to,
+      labeled_only: "false",
       only_triggered: "true",
     });
-    const decisionParams = new URLSearchParams({
+    const tierParams = new URLSearchParams({
       user_id: USER_ID,
       plugin: "v1.4",
       from,
       to,
-      group_by: decisionAnalyticsGroup.value,
+      labeled_only: "false",
     });
-    const [triggerResponse, decisionResponse] = await Promise.all([
-      fetch(`${API_BASE_URL}/radar/analytics/triggers?${triggerParams.toString()}`),
-      fetch(`${API_BASE_URL}/radar/analytics/decisions?${decisionParams.toString()}`),
+    const [coverageResponse, triggerResponse, tierResponse] = await Promise.all([
+      fetch(`${API_BASE_URL}/radar/analytics/coverage?${coverageParams.toString()}`),
+      fetch(`${API_BASE_URL}/radar/analytics/attribution/triggers?${triggerParams.toString()}`),
+      fetch(`${API_BASE_URL}/radar/analytics/attribution/tier?${tierParams.toString()}`),
     ]);
+    if (!coverageResponse.ok) {
+      throw new Error(`radar-service analytics ${coverageResponse.status}`);
+    }
     if (!triggerResponse.ok) {
       throw new Error(`radar-service analytics ${triggerResponse.status}`);
     }
-    if (!decisionResponse.ok) {
-      throw new Error(`radar-service analytics ${decisionResponse.status}`);
+    if (!tierResponse.ok) {
+      throw new Error(`radar-service analytics ${tierResponse.status}`);
     }
+    coverage.value = await coverageResponse.json();
     const triggerPayload = await triggerResponse.json();
-    const decisionPayload = await decisionResponse.json();
-    analyticsTriggers.value = triggerPayload.items || [];
-    analyticsDecisions.value = decisionPayload.items || [];
+    const tierPayload = await tierResponse.json();
+    attributionTriggers.value = triggerPayload.items || [];
+    attributionTiers.value = tierPayload.items || [];
   } catch (err) {
     analyticsError.value = err?.message || "api-gateway 連線失敗";
+    addErrorLog("radar/analytics", err);
   } finally {
     analyticsLoading.value = false;
   }
 };
-
-watch(decisionAnalyticsGroup, () => {
-  fetchOutcomeAnalytics();
-});
 
 const selectedCoreItems = computed(() =>
   holdings.value
@@ -395,6 +435,7 @@ const fetchTriggerHistory = async () => {
     triggerItems.value = payload.items || [];
   } catch (err) {
     triggerError.value = err?.message || "api-gateway 連線失敗";
+    addErrorLog("radar/triggers/history", err);
   } finally {
     triggerLoading.value = false;
   }
@@ -414,6 +455,7 @@ const fetchNewsSignals = async () => {
     lastUpdated.value = new Date().toLocaleString("zh-TW");
   } catch (err) {
     newsError.value = err?.message || "api-gateway 連線失敗";
+    addErrorLog("news/signals", err);
   } finally {
     newsLoading.value = false;
   }
@@ -431,6 +473,7 @@ const fetchDecisionPackage = async () => {
     decisionPackage.value = await response.json();
   } catch (err) {
     decisionError.value = err?.message || "api-gateway 連線失敗";
+    addErrorLog("radar/decision", err);
   } finally {
     decisionLoading.value = false;
   }
@@ -479,6 +522,7 @@ const fetchHoldings = async () => {
     }
   } catch (err) {
     holdingsError.value = err?.message || "api-gateway 連線失敗";
+    addErrorLog("portfolio/holdings", err);
   } finally {
     holdingsLoading.value = false;
   }
@@ -496,6 +540,7 @@ const syncPortfolio = async () => {
     }
   } catch (err) {
     holdingsError.value = err?.message || "api-gateway 連線失敗";
+    addErrorLog("portfolio/sync", err);
   } finally {
     holdingsSyncing.value = false;
   }
@@ -514,6 +559,7 @@ const rebuildPositions = async () => {
     await fetchHoldings();
   } catch (err) {
     holdingsError.value = err?.message || "api-gateway 連線失敗";
+    addErrorLog("portfolio/rebuild_positions", err);
   } finally {
     holdingsRebuilding.value = false;
   }
@@ -536,6 +582,7 @@ const saveCoreHoldings = async () => {
     holdingsSavedAt.value = new Date().toLocaleString("zh-TW");
   } catch (err) {
     holdingsError.value = err?.message || "api-gateway 連線失敗";
+    addErrorLog("portfolio/core_holdings", err);
   } finally {
     holdingsSaving.value = false;
   }
@@ -554,6 +601,7 @@ const fetchSymbolMappings = async () => {
     symbolMappings.value = payload.items || [];
   } catch (err) {
     mappingsError.value = err?.message || "api-gateway 連線失敗";
+    addErrorLog("portfolio/symbol_mappings", err);
   } finally {
     mappingsLoading.value = false;
   }
@@ -585,6 +633,7 @@ const resolveSymbolMapping = async () => {
     await fetchSymbolMappings();
   } catch (err) {
     mappingsError.value = err?.message || "api-gateway 連線失敗";
+    addErrorLog("portfolio/symbol_mappings/resolve", err);
   } finally {
     mappingResolving.value = false;
   }
@@ -616,6 +665,7 @@ const saveSymbolMapping = async () => {
     await fetchSymbolMappings();
   } catch (err) {
     mappingsError.value = err?.message || "api-gateway 連線失敗";
+    addErrorLog("portfolio/symbol_mappings", err);
   } finally {
     mappingSaving.value = false;
   }
@@ -1063,7 +1113,33 @@ onMounted(() => {
         <div v-else class="analytics-grid">
           <div class="analytics-card">
             <div class="analytics-title">
-              <h3>Trigger Hit Rate</h3>
+              <h3>Coverage</h3>
+              <span class="meta">近 30 天</span>
+            </div>
+            <div v-if="!coverage" class="empty">尚無 coverage</div>
+            <div v-else class="coverage-metrics">
+              <div class="metric">
+                <span class="label">coverage_rate</span>
+                <span class="value" data-testid="coverage-rate">
+                  {{ formatRate(coverage.coverage_rate) }}
+                </span>
+              </div>
+              <div class="metric">
+                <span class="label">unknown_rate</span>
+                <span class="value" data-testid="unknown-rate">
+                  {{ formatRate(coverage.unknown_rate) }}
+                </span>
+              </div>
+              <div class="metric">
+                <span class="label">p95 delay</span>
+                <span class="value">{{ formatSeconds(coverage.label_delay_p95_seconds) }}</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="analytics-card">
+            <div class="analytics-title">
+              <h3>Trigger Attribution</h3>
               <span class="meta">近 30 天</span>
             </div>
             <div v-if="suspiciousTriggers.length > 0" class="suspicious-list">
@@ -1082,6 +1158,7 @@ onMounted(() => {
                 <span>wins</span>
                 <span>losses</span>
                 <span>neutral</span>
+                <span>unknown</span>
                 <span>win_rate</span>
               </div>
               <div
@@ -1094,6 +1171,7 @@ onMounted(() => {
                 <span>{{ row.wins }}</span>
                 <span>{{ row.losses }}</span>
                 <span>{{ row.neutral }}</span>
+                <span>{{ row.unknown }}</span>
                 <span>{{ formatRate(row.win_rate) }}</span>
               </div>
             </div>
@@ -1101,38 +1179,57 @@ onMounted(() => {
 
           <div class="analytics-card">
             <div class="analytics-title">
-              <h3>Decision Outcome</h3>
-              <div class="analytics-toggle">
-                <span class="meta">by</span>
-                <select v-model="decisionAnalyticsGroup">
-                  <option value="tier">tier</option>
-                  <option value="decision">decision</option>
-                </select>
-              </div>
+              <h3>Tier Attribution</h3>
+              <span class="meta">近 30 天</span>
             </div>
-            <div v-if="sortedDecisionAnalytics.length === 0" class="empty">尚無 outcomes</div>
+            <div v-if="sortedTierAnalytics.length === 0" class="empty">尚無 outcomes</div>
             <div v-else class="analytics-table">
               <div class="analytics-row analytics-header">
-                <span>{{ decisionAnalyticsGroup }}</span>
+                <span>tier</span>
                 <span>total</span>
                 <span>wins</span>
                 <span>losses</span>
                 <span>neutral</span>
+                <span>unknown</span>
                 <span>win_rate</span>
               </div>
               <div
-                v-for="(row, idx) in sortedDecisionAnalytics"
-                :key="`${row.label || row[decisionAnalyticsGroup] || 'item'}-${idx}`"
+                v-for="(row, idx) in sortedTierAnalytics"
+                :key="`${row.tier}-${idx}`"
                 class="analytics-row"
               >
-                <span class="pill">{{ row.label || row[decisionAnalyticsGroup] }}</span>
+                <span class="pill">{{ row.tier }}</span>
                 <span>{{ row.total }}</span>
                 <span>{{ row.wins }}</span>
                 <span>{{ row.losses }}</span>
                 <span>{{ row.neutral }}</span>
+                <span>{{ row.unknown }}</span>
                 <span>{{ formatRate(row.win_rate) }}</span>
               </div>
             </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="panel subtle">
+      <div class="panel-header">
+        <h2>Error Logs</h2>
+        <button class="ghost" type="button" @click="clearErrorLogs" :disabled="errorLogs.length === 0">
+          Clear
+        </button>
+        <button class="collapse-btn" type="button" @click="togglePanel('errorLog')">
+          {{ panels.errorLog ? "展開" : "收合" }}
+        </button>
+      </div>
+
+      <div v-show="!panels.errorLog">
+        <div v-if="errorLogs.length === 0" class="empty">No errors</div>
+        <div v-else class="error-log">
+          <div v-for="item in errorLogs" :key="item.id" class="error-row">
+            <span class="mono">{{ item.time }}</span>
+            <span class="pill">{{ item.source }}</span>
+            <span class="message">{{ item.message }}</span>
           </div>
         </div>
       </div>
@@ -1610,7 +1707,7 @@ strong {
 
 .analytics-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(360px, 1fr));
   gap: 1rem;
 }
 
@@ -1629,35 +1726,50 @@ strong {
   align-items: center;
 }
 
-.analytics-toggle {
-  display: flex;
-  align-items: center;
-  gap: 0.4rem;
-}
-
-.analytics-toggle select {
-  padding: 0.3rem 0.5rem;
-  border-radius: 8px;
-  border: 1px solid rgba(148, 163, 184, 0.3);
-  background: rgba(15, 23, 42, 0.7);
-  color: #e2e8f0;
-  font-size: 0.75rem;
-}
-
 .analytics-title h3 {
   margin: 0;
   font-size: 0.95rem;
   color: #e2e8f0;
 }
 
+.coverage-metrics {
+  display: grid;
+  gap: 0.5rem;
+}
+
+.coverage-metrics .metric {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0.5rem 0.6rem;
+  border-radius: 10px;
+  background: rgba(15, 23, 42, 0.7);
+  border: 1px solid rgba(148, 163, 184, 0.2);
+  font-size: 0.8rem;
+}
+
+.coverage-metrics .label {
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  font-size: 0.65rem;
+  color: #94a3b8;
+}
+
+.coverage-metrics .value {
+  font-weight: 600;
+  color: #e2e8f0;
+}
+
 .analytics-table {
   display: grid;
   gap: 0.4rem;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
 }
 
 .analytics-row {
   display: grid;
-  grid-template-columns: minmax(0, 2fr) 70px 70px 70px 70px 90px;
+  grid-template-columns: minmax(220px, 2fr) 70px 70px 70px 70px 70px 90px;
   gap: 0.6rem;
   align-items: center;
   padding: 0.5rem 0.65rem;
@@ -1665,6 +1777,15 @@ strong {
   border: 1px solid rgba(148, 163, 184, 0.2);
   border-radius: 12px;
   font-size: 0.78rem;
+  min-width: 680px;
+}
+
+.analytics-row .key {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  word-break: normal;
+  overflow-wrap: normal;
 }
 
 .analytics-header {
@@ -1691,11 +1812,56 @@ strong {
   font-size: 0.75rem;
 }
 
+.suspicious-row .key {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  word-break: normal;
+  overflow-wrap: normal;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.error-log {
+  display: grid;
+  gap: 0.5rem;
+}
+
+.error-row {
+  display: grid;
+  grid-template-columns: 140px 160px minmax(0, 1fr);
+  gap: 0.6rem;
+  align-items: center;
+  padding: 0.55rem 0.7rem;
+  border-radius: 12px;
+  background: rgba(15, 23, 42, 0.7);
+  border: 1px solid rgba(148, 163, 184, 0.2);
+  font-size: 0.78rem;
+}
+
+.error-row .message {
+  color: #fca5a5;
+  word-break: break-word;
+}
+
 @media (max-width: 960px) {
   .decision-row {
     grid-template-columns: 1fr;
   }
   .analytics-row {
+    grid-template-columns: 1fr;
+    min-width: 0;
+  }
+}
+
+@media (max-width: 1400px) {
+  .analytics-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 1100px) {
+  .analytics-grid {
     grid-template-columns: 1fr;
   }
 }

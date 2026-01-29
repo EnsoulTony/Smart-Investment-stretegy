@@ -694,6 +694,8 @@ def upsert_decision_outcome(
     if outcome:
         outcome.outcome_label = payload.outcome_label
         outcome.outcome_note = payload.outcome_note
+        outcome.horizon = payload.horizon or outcome.horizon or "D1"
+        outcome.labeled_at = now
         outcome.updated_at = now
     else:
         outcome = DecisionOutcome(
@@ -703,6 +705,8 @@ def upsert_decision_outcome(
             decision_inputs_hash=payload.decision_inputs_hash,
             outcome_label=payload.outcome_label,
             outcome_note=payload.outcome_note,
+            labeled_at=now,
+            horizon=payload.horizon or "D1",
             created_at=now,
             updated_at=now,
         )
@@ -716,6 +720,8 @@ def upsert_decision_outcome(
         "decision_inputs_hash": outcome.decision_inputs_hash,
         "outcome_label": outcome.outcome_label,
         "outcome_note": outcome.outcome_note,
+        "labeled_at": outcome.labeled_at.isoformat() if outcome.labeled_at else None,
+        "horizon": outcome.horizon,
         "created_at": outcome.created_at.isoformat() if outcome.created_at else None,
         "updated_at": outcome.updated_at.isoformat() if outcome.updated_at else None,
     }
@@ -762,6 +768,8 @@ def list_decision_outcomes(
             "decision_inputs_hash": row.decision_inputs_hash,
             "outcome_label": row.outcome_label,
             "outcome_note": row.outcome_note,
+            "labeled_at": row.labeled_at.isoformat() if row.labeled_at else None,
+            "horizon": row.horizon,
             "created_at": row.created_at.isoformat() if row.created_at else None,
             "updated_at": row.updated_at.isoformat() if row.updated_at else None,
         }

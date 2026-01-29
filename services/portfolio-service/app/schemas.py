@@ -240,6 +240,7 @@ class OutcomeUpsertRequest(BaseModel):
     decision_inputs_hash: str = Field(..., min_length=1)
     outcome_label: str = Field(..., min_length=1)
     outcome_note: Optional[str] = None
+    horizon: Optional[str] = "D1"
 
 
 class OutcomeItem(BaseModel):
@@ -249,6 +250,8 @@ class OutcomeItem(BaseModel):
     decision_inputs_hash: str
     outcome_label: str
     outcome_note: Optional[str] = None
+    labeled_at: Optional[str] = None
+    horizon: Optional[str] = None
     created_at: Optional[str] = None
     updated_at: Optional[str] = None
 

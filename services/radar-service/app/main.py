@@ -20,6 +20,9 @@ from .db import (
     fetch_trigger_history,
     fetch_trigger_analytics,
     fetch_decision_analytics,
+    fetch_coverage_analytics,
+    fetch_trigger_attribution,
+    fetch_tier_attribution,
 )
 from .news_fusion import (
     compute_news_score,
@@ -708,5 +711,155 @@ async def get_decision_analytics(
         "from": from_dt.isoformat(),
         "to": to_dt.isoformat(),
         "group_by": group_by,
+        "items": items,
+    }
+
+
+@app.get("/radar/analytics/coverage", tags=["radar"])
+async def get_coverage_analytics(
+    user_id: str = Query(..., description="User ID for analytics lookup"),
+    from_date: str = Query(..., alias="from", description="Start date (YYYY-MM-DD)"),
+    to_date: str = Query(..., alias="to", description="End date (YYYY-MM-DD)"),
+    plugin: str = Query(default="v1.4", description="Strategy plugin"),
+) -> dict:
+    """Return coverage analytics for decision outcomes."""
+    try:
+        from_dt = date.fromisoformat(from_date)
+        to_dt = date.fromisoformat(to_date)
+    except ValueError:
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "status": "invalid_request",
+                "message": "Invalid date format. Expected YYYY-MM-DD",
+            },
+        )
+
+    try:
+        metrics = fetch_coverage_analytics(
+            user_id=user_id,
+            plugin=plugin,
+            from_date=from_dt,
+            to_date=to_dt,
+        )
+    except Exception as e:
+        raise HTTPException(
+            status_code=502,
+            detail={
+                "status": "upstream_error",
+                "service": "postgres",
+                "message": f"DB read failed: {str(e)}",
+            },
+        )
+
+    return {
+        "schema_version": "1.0",
+        "user_id": user_id,
+        "plugin": plugin,
+        "from": from_dt.isoformat(),
+        "to": to_dt.isoformat(),
+        **metrics,
+    }
+
+
+@app.get("/radar/analytics/attribution/triggers", tags=["radar"])
+async def get_trigger_attribution(
+    user_id: str = Query(..., description="User ID for analytics lookup"),
+    from_date: str = Query(..., alias="from", description="Start date (YYYY-MM-DD)"),
+    to_date: str = Query(..., alias="to", description="End date (YYYY-MM-DD)"),
+    plugin: str = Query(default="v1.4", description="Strategy plugin"),
+    labeled_only: bool = Query(default=True, description="Only count labeled outcomes"),
+    only_triggered: bool = Query(default=True, description="Only include triggered rows"),
+) -> dict:
+    """Return trigger attribution analytics."""
+    try:
+        from_dt = date.fromisoformat(from_date)
+        to_dt = date.fromisoformat(to_date)
+    except ValueError:
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "status": "invalid_request",
+                "message": "Invalid date format. Expected YYYY-MM-DD",
+            },
+        )
+
+    try:
+        items = fetch_trigger_attribution(
+            user_id=user_id,
+            plugin=plugin,
+            from_date=from_dt,
+            to_date=to_dt,
+            labeled_only=labeled_only,
+            only_triggered=only_triggered,
+        )
+    except Exception as e:
+        raise HTTPException(
+            status_code=502,
+            detail={
+                "status": "upstream_error",
+                "service": "postgres",
+                "message": f"DB read failed: {str(e)}",
+            },
+        )
+
+    return {
+        "schema_version": "1.0",
+        "user_id": user_id,
+        "plugin": plugin,
+        "from": from_dt.isoformat(),
+        "to": to_dt.isoformat(),
+        "labeled_only": labeled_only,
+        "only_triggered": only_triggered,
+        "items": items,
+    }
+
+
+@app.get("/radar/analytics/attribution/tier", tags=["radar"])
+async def get_tier_attribution(
+    user_id: str = Query(..., description="User ID for analytics lookup"),
+    from_date: str = Query(..., alias="from", description="Start date (YYYY-MM-DD)"),
+    to_date: str = Query(..., alias="to", description="End date (YYYY-MM-DD)"),
+    plugin: str = Query(default="v1.4", description="Strategy plugin"),
+    labeled_only: bool = Query(default=True, description="Only count labeled outcomes"),
+) -> dict:
+    """Return tier attribution analytics."""
+    try:
+        from_dt = date.fromisoformat(from_date)
+        to_dt = date.fromisoformat(to_date)
+    except ValueError:
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "status": "invalid_request",
+                "message": "Invalid date format. Expected YYYY-MM-DD",
+            },
+        )
+
+    try:
+        items = fetch_tier_attribution(
+            user_id=user_id,
+            plugin=plugin,
+            from_date=from_dt,
+            to_date=to_dt,
+            labeled_only=labeled_only,
+        )
+    except Exception as e:
+        raise HTTPException(
+            status_code=502,
+            detail={
+                "status": "upstream_error",
+                "service": "postgres",
+                "message": f"DB read failed: {str(e)}",
+            },
+        )
+
+    return {
+        "schema_version": "1.0",
+        "user_id": user_id,
+        "plugin": plugin,
+        "from": from_dt.isoformat(),
+        "to": to_dt.isoformat(),
+        "labeled_only": labeled_only,
         "items": items,
     }

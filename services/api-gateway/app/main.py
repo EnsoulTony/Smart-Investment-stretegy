@@ -612,3 +612,90 @@ async def proxy_radar_analytics_decisions(request: Request) -> Any:
             status_code=500,
             detail=f"轉發請求時發生錯誤: {str(e)}",
         )
+
+
+@app.get("/radar/analytics/coverage", tags=["radar"])
+async def proxy_radar_analytics_coverage(request: Request) -> Any:
+    """轉發雷達 coverage analytics 請求到 Radar Service。"""
+    target_url = f"{RADAR_SERVICE_URL}/radar/analytics/coverage"
+    try:
+        async with httpx.AsyncClient() as client:
+            response = await client.get(
+                target_url,
+                params=dict(request.query_params),
+                timeout=10.0,
+            )
+        return Response(
+            content=response.content,
+            status_code=response.status_code,
+            headers=dict(response.headers),
+            media_type="application/json",
+        )
+    except httpx.RequestError as e:
+        raise HTTPException(
+            status_code=503,
+            detail=f"無法連線到 Radar Service: {str(e)}",
+        )
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"轉發請求時發生錯誤: {str(e)}",
+        )
+
+
+@app.get("/radar/analytics/attribution/triggers", tags=["radar"])
+async def proxy_radar_attribution_triggers(request: Request) -> Any:
+    """轉發雷達 trigger attribution 請求到 Radar Service。"""
+    target_url = f"{RADAR_SERVICE_URL}/radar/analytics/attribution/triggers"
+    try:
+        async with httpx.AsyncClient() as client:
+            response = await client.get(
+                target_url,
+                params=dict(request.query_params),
+                timeout=10.0,
+            )
+        return Response(
+            content=response.content,
+            status_code=response.status_code,
+            headers=dict(response.headers),
+            media_type="application/json",
+        )
+    except httpx.RequestError as e:
+        raise HTTPException(
+            status_code=503,
+            detail=f"無法連線到 Radar Service: {str(e)}",
+        )
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"轉發請求時發生錯誤: {str(e)}",
+        )
+
+
+@app.get("/radar/analytics/attribution/tier", tags=["radar"])
+async def proxy_radar_attribution_tier(request: Request) -> Any:
+    """轉發雷達 tier attribution 請求到 Radar Service。"""
+    target_url = f"{RADAR_SERVICE_URL}/radar/analytics/attribution/tier"
+    try:
+        async with httpx.AsyncClient() as client:
+            response = await client.get(
+                target_url,
+                params=dict(request.query_params),
+                timeout=10.0,
+            )
+        return Response(
+            content=response.content,
+            status_code=response.status_code,
+            headers=dict(response.headers),
+            media_type="application/json",
+        )
+    except httpx.RequestError as e:
+        raise HTTPException(
+            status_code=503,
+            detail=f"無法連線到 Radar Service: {str(e)}",
+        )
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"轉發請求時發生錯誤: {str(e)}",
+        )
