@@ -232,3 +232,125 @@ def fetch_trigger_history(
     with engine.begin() as conn:
         rows = conn.execute(sql, params).mappings().all()
     return [dict(row) for row in rows]
+
+
+def _normalize_analytics_rows(rows: list[dict]) -> list[dict]:
+    normalized = []
+    for row in rows:
+        item = dict(row)
+        total = int(item.get("total") or 0)
+        wins = int(item.get("wins") or 0)
+        losses = int(item.get("losses") or 0)
+        neutral = int(item.get("neutral") or 0)
+        unknown = int(item.get("unknown") or 0)
+        if "triggered" in item:
+            item["triggered"] = int(item.get("triggered") or 0)
+        item["total"] = total
+        item["wins"] = wins
+        item["losses"] = losses
+        item["neutral"] = neutral
+        item["unknown"] = unknown
+        item["win_rate"] = round((wins / total) if total else 0.0, 4)
+        normalized.append(item)
+    return normalized
+
+
+def fetch_trigger_analytics(
+    *,
+    user_id: str,
+    plugin: str,
+    from_date: date,
+    to_date: date,
+    only_triggered: bool,
+) -> list[dict]:
+    clause_triggered = "AND te.is_triggered = TRUE" if only_triggered else ""
+    sql = text(
+        f"""
+        SELECT
+          te.trigger_key AS trigger_key,
+          COUNT(outcomes.id) AS total,
+          SUM(CASE WHEN te.is_triggered THEN 1 ELSE 0 END) AS triggered,
+          SUM(CASE WHEN lower(outcomes.outcome_label) = 'win' THEN 1 ELSE 0 END) AS wins,
+          SUM(CASE WHEN lower(outcomes.outcome_label) = 'loss' THEN 1 ELSE 0 END) AS losses,
+          SUM(CASE WHEN lower(outcomes.outcome_label) = 'neutral' THEN 1 ELSE 0 END) AS neutral,
+          SUM(CASE WHEN lower(outcomes.outcome_label) NOT IN ('win', 'loss', 'neutral') THEN 1 ELSE 0 END) AS unknown
+        FROM trigger_evaluations te
+        JOIN decision_outcomes outcomes
+          ON outcomes.user_id = te.user_id
+         AND outcomes.as_of = te.as_of
+         AND outcomes.plugin = te.plugin
+         AND outcomes.decision_inputs_hash = te.decision_inputs_hash
+        WHERE te.user_id = :user_id
+          AND te.plugin = :plugin
+          AND te.as_of BETWEEN :from_date AND :to_date
+          {clause_triggered}
+        GROUP BY te.trigger_key
+        """
+    )
+    with engine.begin() as conn:
+        rows = conn.execute(
+            sql,
+            {
+                "user_id": user_id,
+                "plugin": plugin,
+                "from_date": from_date,
+                "to_date": to_date,
+            },
+        ).mappings().all()
+    return _normalize_analytics_rows([dict(row) for row in rows])
+
+
+def fetch_decision_analytics(
+    *,
+    user_id: str,
+    plugin: str,
+    from_date: date,
+    to_date: date,
+    group_by: str,
+) -> list[dict]:
+    if group_by == "decision":
+        label_expr = "COALESCE(ds.decision, 'unknown')"
+        label_field = "decision"
+    else:
+        label_expr = (
+            "CASE "
+            "WHEN COALESCE((ds.payload->'evidence'->'news_context'->'tiers_count'->>'N1')::int, 0) > 0 THEN 'N1' "
+            "WHEN COALESCE((ds.payload->'evidence'->'news_context'->'tiers_count'->>'N3')::int, 0) > 0 THEN 'N3' "
+            "ELSE 'unknown' "
+            "END"
+        )
+        label_field = "tier"
+
+    sql = text(
+        f"""
+        SELECT
+          {label_expr} AS label,
+          {label_expr} AS {label_field},
+          COUNT(outcomes.id) AS total,
+          SUM(CASE WHEN lower(outcomes.outcome_label) = 'win' THEN 1 ELSE 0 END) AS wins,
+          SUM(CASE WHEN lower(outcomes.outcome_label) = 'loss' THEN 1 ELSE 0 END) AS losses,
+          SUM(CASE WHEN lower(outcomes.outcome_label) = 'neutral' THEN 1 ELSE 0 END) AS neutral,
+          SUM(CASE WHEN lower(outcomes.outcome_label) NOT IN ('win', 'loss', 'neutral') THEN 1 ELSE 0 END) AS unknown
+        FROM decision_outcomes outcomes
+        LEFT JOIN decision_snapshots ds
+          ON ds.user_id = outcomes.user_id
+         AND ds.as_of = outcomes.as_of
+         AND ds.plugin = outcomes.plugin
+         AND ds.inputs_hash = outcomes.decision_inputs_hash
+        WHERE outcomes.user_id = :user_id
+          AND outcomes.plugin = :plugin
+          AND outcomes.as_of BETWEEN :from_date AND :to_date
+        GROUP BY {label_expr}
+        """
+    )
+    with engine.begin() as conn:
+        rows = conn.execute(
+            sql,
+            {
+                "user_id": user_id,
+                "plugin": plugin,
+                "from_date": from_date,
+                "to_date": to_date,
+            },
+        ).mappings().all()
+    return _normalize_analytics_rows([dict(row) for row in rows])

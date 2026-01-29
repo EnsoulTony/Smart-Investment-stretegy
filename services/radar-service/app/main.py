@@ -18,6 +18,8 @@ from .db import (
     build_news_inputs,
     insert_trigger_evaluations,
     fetch_trigger_history,
+    fetch_trigger_analytics,
+    fetch_decision_analytics,
 )
 from .news_fusion import (
     compute_news_score,
@@ -595,5 +597,116 @@ async def get_trigger_history(
         "plugin": plugin,
         "from": from_dt.isoformat(),
         "to": to_dt.isoformat(),
+        "items": items,
+    }
+
+
+@app.get("/radar/analytics/triggers", tags=["radar"])
+async def get_trigger_analytics(
+    user_id: str = Query(..., description="User ID for analytics lookup"),
+    from_date: str = Query(..., alias="from", description="Start date (YYYY-MM-DD)"),
+    to_date: str = Query(..., alias="to", description="End date (YYYY-MM-DD)"),
+    plugin: str = Query(default="v1.4", description="Strategy plugin"),
+    only_triggered: bool = Query(default=False, description="Only count triggered rows"),
+) -> dict:
+    """Return aggregated trigger outcome analytics for a user."""
+    try:
+        from_dt = date.fromisoformat(from_date)
+        to_dt = date.fromisoformat(to_date)
+    except ValueError:
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "status": "invalid_request",
+                "message": "Invalid date format. Expected YYYY-MM-DD",
+            },
+        )
+
+    try:
+        items = fetch_trigger_analytics(
+            user_id=user_id,
+            plugin=plugin,
+            from_date=from_dt,
+            to_date=to_dt,
+            only_triggered=only_triggered,
+        )
+    except Exception as e:
+        raise HTTPException(
+            status_code=502,
+            detail={
+                "status": "upstream_error",
+                "service": "postgres",
+                "message": f"DB read failed: {str(e)}",
+            },
+        )
+
+    return {
+        "schema_version": "1.0",
+        "user_id": user_id,
+        "plugin": plugin,
+        "from": from_dt.isoformat(),
+        "to": to_dt.isoformat(),
+        "only_triggered": only_triggered,
+        "items": items,
+    }
+
+
+@app.get("/radar/analytics/decisions", tags=["radar"])
+async def get_decision_analytics(
+    user_id: str = Query(..., description="User ID for analytics lookup"),
+    from_date: str = Query(..., alias="from", description="Start date (YYYY-MM-DD)"),
+    to_date: str = Query(..., alias="to", description="End date (YYYY-MM-DD)"),
+    plugin: str = Query(default="v1.4", description="Strategy plugin"),
+    group_by: str = Query(default="tier", description="Group by tier or decision"),
+) -> dict:
+    """Return aggregated decision outcome analytics for a user."""
+    try:
+        from_dt = date.fromisoformat(from_date)
+        to_dt = date.fromisoformat(to_date)
+    except ValueError:
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "status": "invalid_request",
+                "message": "Invalid date format. Expected YYYY-MM-DD",
+            },
+        )
+
+    if group_by not in {"tier", "decision"}:
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "status": "invalid_request",
+                "message": "Invalid group_by. Expected 'tier' or 'decision'",
+            },
+        )
+
+    try:
+        items = fetch_decision_analytics(
+            user_id=user_id,
+            plugin=plugin,
+            from_date=from_dt,
+            to_date=to_dt,
+            group_by=group_by,
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=502,
+            detail={
+                "status": "upstream_error",
+                "service": "postgres",
+                "message": f"DB read failed: {str(e)}",
+            },
+        )
+
+    return {
+        "schema_version": "1.0",
+        "user_id": user_id,
+        "plugin": plugin,
+        "from": from_dt.isoformat(),
+        "to": to_dt.isoformat(),
+        "group_by": group_by,
         "items": items,
     }

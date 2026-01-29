@@ -1,5 +1,5 @@
 <script setup>
-import { computed, onMounted, ref } from "vue";
+import { computed, onMounted, ref, watch } from "vue";
 import { formatHealthStatus } from "./lib/health";
 
 // 以靜態列表描述目前的服務骨架，後續可改為即時輪詢。
@@ -35,6 +35,11 @@ const decisionHistoryLoading = ref(false);
 const outcomeMap = ref(new Map());
 const outcomeEditing = ref("");
 const outcomeDrafts = ref({});
+const analyticsTriggers = ref([]);
+const analyticsDecisions = ref([]);
+const analyticsLoading = ref(false);
+const analyticsError = ref("");
+const decisionAnalyticsGroup = ref("tier");
 const holdings = ref([]);
 const positions = ref([]);
 const holdingsError = ref("");
@@ -76,6 +81,7 @@ const panels = ref({
   mappings: true,
   decision: true,
   decisionHistory: false,
+  analytics: false,
   triggers: false,
   health: true,
 });
@@ -101,6 +107,17 @@ const formatNotePreview = (text) => {
     return "-";
   }
   return text.length > 60 ? `${text.slice(0, 60)}...` : text;
+};
+
+const formatRate = (value) => {
+  if (value === null || value === undefined) {
+    return "-";
+  }
+  const rate = Number(value);
+  if (Number.isNaN(rate)) {
+    return "-";
+  }
+  return `${(rate * 100).toFixed(1)}%`;
 };
 
 const getOutcome = (hash) => outcomeMap.value.get(hash) || { outcome_label: "unknown", outcome_note: "" };
@@ -189,6 +206,92 @@ const fetchOutcomes = async () => {
     decisionHistoryError.value = err?.message || "api-gateway 連線失敗";
   }
 };
+
+const sortedTriggerAnalytics = computed(() => {
+  return [...analyticsTriggers.value].sort((a, b) => {
+    const rateDiff = (Number(b.win_rate) || 0) - (Number(a.win_rate) || 0);
+    if (rateDiff !== 0) {
+      return rateDiff;
+    }
+    return (Number(b.total) || 0) - (Number(a.total) || 0);
+  });
+});
+
+const sortedDecisionAnalytics = computed(() => {
+  return [...analyticsDecisions.value].sort((a, b) => {
+    const rateDiff = (Number(b.win_rate) || 0) - (Number(a.win_rate) || 0);
+    if (rateDiff !== 0) {
+      return rateDiff;
+    }
+    return (Number(b.total) || 0) - (Number(a.total) || 0);
+  });
+});
+
+const suspiciousTriggers = computed(() => {
+  const scored = analyticsTriggers.value
+    .map((row) => {
+      const total = Number(row.total) || 0;
+      const losses = Number(row.losses) || 0;
+      const lossRate = total ? losses / total : 0;
+      return { ...row, loss_rate: lossRate };
+    })
+    .filter((row) => (Number(row.total) || 0) >= 2)
+    .sort((a, b) => {
+      const rateDiff = (b.loss_rate || 0) - (a.loss_rate || 0);
+      if (rateDiff !== 0) {
+        return rateDiff;
+      }
+      return (Number(b.total) || 0) - (Number(a.total) || 0);
+    });
+  return scored.slice(0, 3);
+});
+
+const fetchOutcomeAnalytics = async () => {
+  analyticsLoading.value = true;
+  analyticsError.value = "";
+  try {
+    const to = asOf.value;
+    const fromDate = new Date(to);
+    fromDate.setDate(fromDate.getDate() - 30);
+    const from = fromDate.toISOString().slice(0, 10);
+    const triggerParams = new URLSearchParams({
+      user_id: USER_ID,
+      plugin: "v1.4",
+      from,
+      to,
+      only_triggered: "true",
+    });
+    const decisionParams = new URLSearchParams({
+      user_id: USER_ID,
+      plugin: "v1.4",
+      from,
+      to,
+      group_by: decisionAnalyticsGroup.value,
+    });
+    const [triggerResponse, decisionResponse] = await Promise.all([
+      fetch(`${API_BASE_URL}/radar/analytics/triggers?${triggerParams.toString()}`),
+      fetch(`${API_BASE_URL}/radar/analytics/decisions?${decisionParams.toString()}`),
+    ]);
+    if (!triggerResponse.ok) {
+      throw new Error(`radar-service analytics ${triggerResponse.status}`);
+    }
+    if (!decisionResponse.ok) {
+      throw new Error(`radar-service analytics ${decisionResponse.status}`);
+    }
+    const triggerPayload = await triggerResponse.json();
+    const decisionPayload = await decisionResponse.json();
+    analyticsTriggers.value = triggerPayload.items || [];
+    analyticsDecisions.value = decisionPayload.items || [];
+  } catch (err) {
+    analyticsError.value = err?.message || "api-gateway 連線失敗";
+  } finally {
+    analyticsLoading.value = false;
+  }
+};
+
+watch(decisionAnalyticsGroup, () => {
+  fetchOutcomeAnalytics();
+});
 
 const selectedCoreItems = computed(() =>
   holdings.value
@@ -526,6 +629,7 @@ const fetchAll = async () => {
     fetchSymbolMappings(),
     fetchDecisionHistory(),
     fetchTriggerHistory(),
+    fetchOutcomeAnalytics(),
   ]);
   await fetchOutcomes();
 };
@@ -938,6 +1042,98 @@ onMounted(() => {
               </div>
             </div>
           </template>
+        </div>
+      </div>
+    </section>
+
+    <section class="panel">
+      <div class="panel-header">
+        <h2>Outcome Analytics</h2>
+        <span class="badge">radar-service</span>
+        <button class="collapse-btn" type="button" @click="togglePanel('analytics')">
+          {{ panels.analytics ? "展開" : "收合" }}
+        </button>
+      </div>
+
+      <div v-show="!panels.analytics">
+        <div v-if="analyticsError" class="error">
+          {{ analyticsError }}
+        </div>
+        <div v-else-if="analyticsLoading" class="empty">讀取中...</div>
+        <div v-else class="analytics-grid">
+          <div class="analytics-card">
+            <div class="analytics-title">
+              <h3>Trigger Hit Rate</h3>
+              <span class="meta">近 30 天</span>
+            </div>
+            <div v-if="suspiciousTriggers.length > 0" class="suspicious-list">
+              <p class="section-subtitle">最可疑 triggers</p>
+              <div v-for="(row, idx) in suspiciousTriggers" :key="`${row.trigger_key}-${idx}`" class="suspicious-row">
+                <span class="mono key">{{ row.trigger_key }}</span>
+                <span class="badge neutral">loss {{ formatRate(row.loss_rate) }}</span>
+                <span class="meta">total {{ row.total }}</span>
+              </div>
+            </div>
+            <div v-if="sortedTriggerAnalytics.length === 0" class="empty">尚無 trigger outcomes</div>
+            <div v-else class="analytics-table">
+              <div class="analytics-row analytics-header">
+                <span>trigger_key</span>
+                <span>total</span>
+                <span>wins</span>
+                <span>losses</span>
+                <span>neutral</span>
+                <span>win_rate</span>
+              </div>
+              <div
+                v-for="(row, idx) in sortedTriggerAnalytics"
+                :key="`${row.trigger_key}-${idx}`"
+                class="analytics-row"
+              >
+                <span class="mono key">{{ row.trigger_key }}</span>
+                <span>{{ row.total }}</span>
+                <span>{{ row.wins }}</span>
+                <span>{{ row.losses }}</span>
+                <span>{{ row.neutral }}</span>
+                <span>{{ formatRate(row.win_rate) }}</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="analytics-card">
+            <div class="analytics-title">
+              <h3>Decision Outcome</h3>
+              <div class="analytics-toggle">
+                <span class="meta">by</span>
+                <select v-model="decisionAnalyticsGroup">
+                  <option value="tier">tier</option>
+                  <option value="decision">decision</option>
+                </select>
+              </div>
+            </div>
+            <div v-if="sortedDecisionAnalytics.length === 0" class="empty">尚無 outcomes</div>
+            <div v-else class="analytics-table">
+              <div class="analytics-row analytics-header">
+                <span>{{ decisionAnalyticsGroup }}</span>
+                <span>total</span>
+                <span>wins</span>
+                <span>losses</span>
+                <span>neutral</span>
+                <span>win_rate</span>
+              </div>
+              <div
+                v-for="(row, idx) in sortedDecisionAnalytics"
+                :key="`${row.label || row[decisionAnalyticsGroup] || 'item'}-${idx}`"
+                class="analytics-row"
+              >
+                <span class="pill">{{ row.label || row[decisionAnalyticsGroup] }}</span>
+                <span>{{ row.total }}</span>
+                <span>{{ row.wins }}</span>
+                <span>{{ row.losses }}</span>
+                <span>{{ row.neutral }}</span>
+                <span>{{ formatRate(row.win_rate) }}</span>
+              </div>
+            </div>
+          </div>
         </div>
       </div>
     </section>
@@ -1412,8 +1608,94 @@ strong {
   justify-content: flex-end;
 }
 
+.analytics-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 1rem;
+}
+
+.analytics-card {
+  background: rgba(15, 23, 42, 0.85);
+  border: 1px solid rgba(148, 163, 184, 0.2);
+  border-radius: 14px;
+  padding: 1rem;
+  display: grid;
+  gap: 0.8rem;
+}
+
+.analytics-title {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.analytics-toggle {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.analytics-toggle select {
+  padding: 0.3rem 0.5rem;
+  border-radius: 8px;
+  border: 1px solid rgba(148, 163, 184, 0.3);
+  background: rgba(15, 23, 42, 0.7);
+  color: #e2e8f0;
+  font-size: 0.75rem;
+}
+
+.analytics-title h3 {
+  margin: 0;
+  font-size: 0.95rem;
+  color: #e2e8f0;
+}
+
+.analytics-table {
+  display: grid;
+  gap: 0.4rem;
+}
+
+.analytics-row {
+  display: grid;
+  grid-template-columns: minmax(0, 2fr) 70px 70px 70px 70px 90px;
+  gap: 0.6rem;
+  align-items: center;
+  padding: 0.5rem 0.65rem;
+  background: rgba(15, 23, 42, 0.7);
+  border: 1px solid rgba(148, 163, 184, 0.2);
+  border-radius: 12px;
+  font-size: 0.78rem;
+}
+
+.analytics-header {
+  background: rgba(30, 41, 59, 0.9);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-size: 0.7rem;
+  color: #cbd5f5;
+}
+
+.suspicious-list {
+  display: grid;
+  gap: 0.4rem;
+}
+
+.suspicious-row {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.45rem 0.6rem;
+  border-radius: 10px;
+  background: rgba(15, 23, 42, 0.65);
+  border: 1px solid rgba(148, 163, 184, 0.2);
+  font-size: 0.75rem;
+}
+
 @media (max-width: 960px) {
   .decision-row {
+    grid-template-columns: 1fr;
+  }
+  .analytics-row {
     grid-template-columns: 1fr;
   }
 }
