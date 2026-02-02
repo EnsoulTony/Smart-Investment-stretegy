@@ -164,6 +164,10 @@ const formatSignalTriggerLine = (triggers) => {
     .filter((row) => row.length > 0);
   return rows.length > 0 ? rows.join("；") : "未提供可證偽條件";
 };
+const formatSignalSourceLabel = (item) => {
+  const sourceName = String(item?.source || "").trim() || "媒體";
+  return `來源：${sourceName} ↗`;
+};
 const decisionSummary = computed(() => {
   if (!decisionPackage.value) {
     return "尚未產生融合決策說明";
@@ -871,7 +875,7 @@ onMounted(() => {
 
     <section class="panel" id="panel-news">
       <div class="panel-header">
-        <h2>戰情室｜決策引用主張（Signals）</h2>
+        <h2>決策引用敘述（Signals · 暫）</h2>
         <span class="badge">news-service</span>
         <button class="collapse-btn" type="button" @click="togglePanel('news')">
           {{ panels.news ? "展開" : "收合" }}
@@ -886,21 +890,21 @@ onMounted(() => {
       <div v-else>
         <div class="signals-intro">
           <p class="signals-note">
-            本區每列皆為「被決策引用」的可證偽主張。先看主張，再看何時會錯；Tier 僅為輔助標記。
+            目前顯示為被決策引用的新聞敘述；主張將於後續階段依穩定條件抽象化。
           </p>
           <p class="signals-tier-summary">
-            共 {{ newsItems.length }} 則主張｜N1 {{ n1Items.length }} ・ N3 {{ n3Items.length }}
+            共 {{ newsItems.length }} 則引用敘述｜N1 {{ n1Items.length }} ・ N3 {{ n3Items.length }}
           </p>
         </div>
 
         <div v-if="newsLoading" class="empty">讀取中...</div>
-        <div v-else-if="newsItems.length === 0" class="empty">目前沒有被決策引用的主張</div>
+        <div v-else-if="newsItems.length === 0" class="empty">目前沒有被決策引用的敘述</div>
         <div v-else class="signals-list">
           <article v-for="item in newsItems" :key="item.id" class="signal-claim" :class="{ n1: item.tier === 'N1' }">
             <p class="signal-line">
-              <span class="signal-label">主張</span>
+              <span class="signal-label">引用敘述（暫）</span>
               <span class="signal-value signal-claim-title">
-                <span>{{ item.title || "-" }}</span>
+                <span class="signal-source-summary">來源摘要：{{ item.title || "-" }}</span>
                 <a
                   v-if="item.source_url"
                   class="signal-source-link mono"
@@ -908,13 +912,16 @@ onMounted(() => {
                   target="_blank"
                   rel="noopener noreferrer"
                 >
-                  {{ item.source_url }}
+                  {{ formatSignalSourceLabel(item) }}
                 </a>
               </span>
             </p>
             <p class="signal-line">
               <span class="signal-label">何時會錯</span>
-              <span class="signal-value">{{ formatSignalTriggerLine(item.falsifiable_triggers) }}</span>
+              <span class="signal-value">
+                <span class="signal-falsify-hint">⚠ 以下任一條件成立，代表此敘述被證偽</span>
+                <span>{{ formatSignalTriggerLine(item.falsifiable_triggers) }}</span>
+              </span>
             </p>
             <p class="signal-line">
               <span class="signal-label">Tier（輔助）</span>
@@ -2551,19 +2558,32 @@ strong {
 
 .signal-claim-title {
   display: grid;
-  gap: 0.18rem;
+  gap: 0.25rem;
+}
+
+.signal-source-summary {
+  font-size: 0.8rem;
+  color: #94a3b8;
 }
 
 .signal-source-link {
-  color: #7dd3fc;
-  font-size: 0.75rem;
-  text-decoration: underline;
+  color: #93c5fd;
+  font-size: 0.72rem;
+  text-decoration: none;
   text-underline-offset: 2px;
   width: fit-content;
 }
 
 .signal-source-link:hover {
-  color: #bae6fd;
+  color: #dbeafe;
+  text-decoration: underline;
+}
+
+.signal-falsify-hint {
+  display: block;
+  margin-bottom: 0.2rem;
+  font-size: 0.76rem;
+  color: #fca5a5;
 }
 
 .holdings-grid {
