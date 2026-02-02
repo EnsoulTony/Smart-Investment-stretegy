@@ -150,6 +150,20 @@ const openPanelAndScroll = (key, elementId) => {
 
 const n1Items = computed(() => newsItems.value.filter((item) => item.tier === "N1"));
 const n3Items = computed(() => newsItems.value.filter((item) => item.tier === "N3"));
+const formatSignalTriggerLine = (triggers) => {
+  if (!Array.isArray(triggers) || triggers.length === 0) {
+    return "未提供可證偽條件";
+  }
+  const rows = triggers
+    .map((trigger) => {
+      const parts = [trigger?.name, trigger?.condition, trigger?.value]
+        .filter((value) => value !== null && value !== undefined && String(value).trim() !== "")
+        .map((value) => (typeof value === "object" ? JSON.stringify(value) : String(value)));
+      return parts.join(" · ");
+    })
+    .filter((row) => row.length > 0);
+  return rows.length > 0 ? rows.join("；") : "未提供可證偽條件";
+};
 const decisionSummary = computed(() => {
   if (!decisionPackage.value) {
     return "尚未產生融合決策說明";
@@ -857,7 +871,7 @@ onMounted(() => {
 
     <section class="panel" id="panel-news">
       <div class="panel-header">
-        <h2>戰情室｜新聞訊號</h2>
+        <h2>戰情室｜決策引用主張（Signals）</h2>
         <span class="badge">news-service</span>
         <button class="collapse-btn" type="button" @click="togglePanel('news')">
           {{ panels.news ? "展開" : "收合" }}
@@ -869,78 +883,36 @@ onMounted(() => {
         {{ newsError }}
       </div>
 
-      <div v-else class="news-grid">
-        <div class="tier">
-          <div class="tier-header">
-            <h3>N1：市場重定價</h3>
-            <span class="count">{{ n1Items.length }}</span>
-          </div>
-          <div v-if="n1Items.length === 0" class="empty">目前沒有 N1</div>
-          <article v-for="item in n1Items" :key="item.id" class="news-card n1">
-            <div class="news-title">
-              <h4>{{ item.title }}</h4>
-              <span class="score-pill">Score {{ item.score ?? "-" }}</span>
-            </div>
-            <p>{{ item.summary_zh }}</p>
-            <a
-              v-if="item.source_url"
-              class="news-link"
-              :href="item.source_url"
-              target="_blank"
-              rel="noopener noreferrer"
-            >
-              開啟原文
-            </a>
-            <div class="meta">
-              <span>{{ item.published_at }}</span>
-              <span>Symbols: {{ item.symbols.join(", ") || "-" }}</span>
-            </div>
-            <div class="meta">
-              <span>Groups: {{ item.factor_groups.join(", ") || "-" }}</span>
-              <span>Themes: {{ item.themes.join(", ") || "-" }}</span>
-            </div>
-            <div class="trigger">
-              <span v-for="(t, idx) in item.falsifiable_triggers" :key="idx">
-                {{ t.name }} · {{ t.condition }} · {{ t.value }}
-              </span>
-            </div>
-          </article>
+      <div v-else>
+        <div class="signals-intro">
+          <p class="signals-note">
+            本區每列皆為「被決策引用」的可證偽主張。先看主張，再看何時會錯；Tier 僅為輔助標記。
+          </p>
+          <p class="signals-tier-summary">
+            共 {{ newsItems.length }} 則主張｜N1 {{ n1Items.length }} ・ N3 {{ n3Items.length }}
+          </p>
         </div>
 
-        <div class="tier">
-          <div class="tier-header">
-            <h3>N3：值得追蹤</h3>
-            <span class="count">{{ n3Items.length }}</span>
-          </div>
-          <div v-if="n3Items.length === 0" class="empty">目前沒有 N3</div>
-          <article v-for="item in n3Items" :key="item.id" class="news-card">
-            <div class="news-title">
-              <h4>{{ item.title }}</h4>
-              <span class="score-pill">Score {{ item.score ?? "-" }}</span>
-            </div>
-            <p>{{ item.summary_zh }}</p>
-            <a
-              v-if="item.source_url"
-              class="news-link"
-              :href="item.source_url"
-              target="_blank"
-              rel="noopener noreferrer"
-            >
-              開啟原文
-            </a>
-            <div class="meta">
-              <span>{{ item.published_at }}</span>
-              <span>Symbols: {{ item.symbols.join(", ") || "-" }}</span>
-            </div>
-            <div class="meta">
-              <span>Groups: {{ item.factor_groups.join(", ") || "-" }}</span>
-              <span>Themes: {{ item.themes.join(", ") || "-" }}</span>
-            </div>
-            <div class="trigger">
-              <span v-for="(t, idx) in item.falsifiable_triggers" :key="idx">
-                {{ t.name }} · {{ t.condition }} · {{ t.value }}
-              </span>
-            </div>
+        <div v-if="newsLoading" class="empty">讀取中...</div>
+        <div v-else-if="newsItems.length === 0" class="empty">目前沒有被決策引用的主張</div>
+        <div v-else class="signals-list">
+          <article v-for="item in newsItems" :key="item.id" class="signal-claim" :class="{ n1: item.tier === 'N1' }">
+            <p class="signal-line">
+              <span class="signal-label">主張</span>
+              <span class="signal-value">{{ item.title || "-" }}</span>
+            </p>
+            <p class="signal-line">
+              <span class="signal-label">何時會錯</span>
+              <span class="signal-value">{{ formatSignalTriggerLine(item.falsifiable_triggers) }}</span>
+            </p>
+            <p class="signal-line">
+              <span class="signal-label">Tier（輔助）</span>
+              <span class="signal-value"><span class="pill">{{ item.tier || "-" }}</span></span>
+            </p>
+            <p class="signal-line">
+              <span class="signal-label">時間</span>
+              <span class="signal-value mono">{{ item.published_at || "-" }}</span>
+            </p>
           </article>
         </div>
       </div>
@@ -2502,77 +2474,68 @@ strong {
   gap: 0.4rem;
 }
 
-.news-grid {
+.signals-intro {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
-  gap: 1.5rem;
+  gap: 0.45rem;
+  margin-bottom: 0.9rem;
+  padding: 0.8rem 0.9rem;
+  border-radius: 12px;
+  background: rgba(8, 47, 73, 0.18);
+  border: 1px solid rgba(125, 211, 252, 0.3);
 }
 
-.tier-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  margin-bottom: 1rem;
+.signals-note {
+  margin: 0;
+  color: #dbeafe;
+  font-size: 0.86rem;
+  line-height: 1.5;
 }
 
-.count {
-  font-size: 0.9rem;
+.signals-tier-summary {
+  margin: 0;
   color: #93c5fd;
+  font-size: 0.78rem;
 }
 
-.news-card {
+.signals-list {
+  display: grid;
+  gap: 0.8rem;
+}
+
+.signal-claim {
   background: rgba(15, 23, 42, 0.9);
   border: 1px solid rgba(148, 163, 184, 0.2);
-  border-radius: 14px;
-  padding: 1rem;
+  border-radius: 12px;
+  padding: 0.85rem 0.9rem;
   display: grid;
-  gap: 0.5rem;
+  gap: 0.45rem;
 }
 
-.news-card.n1 {
-  border-color: rgba(244, 63, 94, 0.6);
-  box-shadow: 0 12px 28px rgba(244, 63, 94, 0.15);
+.signal-claim.n1 {
+  border-color: rgba(56, 189, 248, 0.45);
 }
 
-.news-card h4 {
+.signal-line {
   margin: 0;
-  font-size: 1.05rem;
+  display: grid;
+  grid-template-columns: 6.8rem 1fr;
+  gap: 0.55rem;
+  align-items: start;
+  font-size: 0.86rem;
 }
 
-.news-title {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 0.75rem;
-}
-
-.score-pill {
-  font-size: 0.7rem;
-  padding: 0.15rem 0.5rem;
-  border-radius: 999px;
-  background: rgba(56, 189, 248, 0.15);
-  color: #7dd3fc;
-  border: 1px solid rgba(125, 211, 252, 0.35);
-  white-space: nowrap;
-  font-weight: 700;
-}
-
-.news-card p {
-  margin: 0;
-  color: #cbd5f5;
-  font-size: 0.9rem;
-}
-
-.news-link {
-  display: inline-flex;
-  width: fit-content;
-  font-size: 0.75rem;
+.signal-label {
   color: #93c5fd;
-  text-decoration: none;
+  font-size: 0.75rem;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  white-space: nowrap;
 }
 
-.news-link:hover {
-  text-decoration: underline;
+.signal-value {
+  color: #e2e8f0;
+  line-height: 1.45;
+  word-break: break-word;
 }
 
 .holdings-grid {
@@ -2653,6 +2616,11 @@ strong {
 }
 
 @media (max-width: 600px) {
+  .signal-line {
+    grid-template-columns: 1fr;
+    gap: 0.2rem;
+  }
+
   li {
     flex-direction: column;
     align-items: flex-start;
