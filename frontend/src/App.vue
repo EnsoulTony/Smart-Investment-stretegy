@@ -64,6 +64,11 @@ const mappingsUpdatedAt = ref("");
 const triggerItems = ref([]);
 const triggerLoading = ref(false);
 const triggerError = ref("");
+const triggerTimelineItems = ref([]);
+const triggerTimelineLoading = ref(false);
+const triggerTimelineError = ref("");
+const showOtherTimelineTriggers = ref(false);
+const TRIGGER_TIMELINE_DAYS = 14;
 const panels = ref({
   news: false,
   coreHoldings: true,
@@ -74,6 +79,7 @@ const panels = ref({
   analytics: false,
   errorLog: false,
   triggers: false,
+  triggersTimeline: false,
   health: true,
 });
 
@@ -119,12 +125,12 @@ const todayDecisionClass = computed(() => {
 });
 const todayDecisionNote = computed(() => {
   if (todayDecision.value === "NO_ACTION") {
-    return "NO_ACTION 為正常狀態";
+    return "僅表示目前無新增權限狀態";
   }
   if (todayDecision.value === "UNKNOWN") {
-    return "尚未判定";
+    return "狀態尚未判定";
   }
-  return "請先檢查證據";
+  return "僅供狀態記錄";
 });
 
 const openPanelAndScroll = (key, elementId) => {
@@ -434,6 +440,72 @@ const formatObservedValue = (value) => {
   return String(value);
 };
 
+const triggerTimelineDays = computed(() => {
+  const days = [];
+  const endDate = new Date(asOf.value);
+  for (let i = TRIGGER_TIMELINE_DAYS - 1; i >= 0; i -= 1) {
+    const date = new Date(endDate);
+    date.setDate(endDate.getDate() - i);
+    days.push(date.toISOString().slice(0, 10));
+  }
+  return days;
+});
+
+const buildTriggerTimelineRows = (rows) => {
+  const keyMap = new Map();
+  rows.forEach((row) => {
+    const key = String(row?.trigger_key || "").trim();
+    const day = String(row?.as_of || "").slice(0, 10);
+    if (!key || !day) {
+      return;
+    }
+    if (!keyMap.has(key)) {
+      keyMap.set(key, new Set());
+    }
+    keyMap.get(key).add(day);
+  });
+  const days = triggerTimelineDays.value;
+  return Array.from(keyMap.entries())
+    .map(([triggerKey, daySet]) => {
+      const dayHits = days.map((day) => daySet.has(day));
+      const count = dayHits.filter(Boolean).length;
+      let hasConsecutive = false;
+      let isolatedCount = 0;
+      for (let i = 0; i < dayHits.length; i += 1) {
+        const hit = dayHits[i];
+        if (!hit) {
+          continue;
+        }
+        if ((i > 0 && dayHits[i - 1]) || (i < dayHits.length - 1 && dayHits[i + 1])) {
+          hasConsecutive = true;
+        } else {
+          isolatedCount += 1;
+        }
+      }
+      const singleDaySpikes = count > 0 && isolatedCount * 2 >= count;
+      const insufficientHistory = count <= 1;
+      return {
+        trigger_key: triggerKey,
+        count,
+        has_consecutive: hasConsecutive ? "yes" : "no",
+        single_day_spikes: singleDaySpikes ? "yes" : "no",
+        insufficient_history: insufficientHistory,
+        day_hits: dayHits,
+        appeared_today: dayHits[dayHits.length - 1] === true,
+      };
+    })
+    .sort((a, b) => {
+      if (b.count !== a.count) {
+        return b.count - a.count;
+      }
+      return a.trigger_key.localeCompare(b.trigger_key);
+    });
+};
+
+const triggerTimelineRows = computed(() => buildTriggerTimelineRows(triggerTimelineItems.value));
+const todayTimelineRows = computed(() => triggerTimelineRows.value.filter((row) => row.appeared_today));
+const otherTimelineRows = computed(() => triggerTimelineRows.value.filter((row) => !row.appeared_today));
+
 const copyHash = async (value) => {
   if (!value) {
     return;
@@ -470,6 +542,39 @@ const fetchTodayTriggeredChecks = async () => {
     addErrorLog("radar/triggers/history", err);
   } finally {
     triggerLoading.value = false;
+  }
+};
+
+const fetchTriggerTimelineHistory = async () => {
+  triggerTimelineLoading.value = true;
+  triggerTimelineError.value = "";
+  showOtherTimelineTriggers.value = false;
+  try {
+    const to = asOf.value;
+    const fromDate = new Date(to);
+    fromDate.setDate(fromDate.getDate() - (TRIGGER_TIMELINE_DAYS - 1));
+    const from = fromDate.toISOString().slice(0, 10);
+    const params = new URLSearchParams({
+      user_id: USER_ID,
+      plugin: "v1.4",
+      from,
+      to,
+      is_triggered: "true",
+      limit: "500",
+      offset: "0",
+    });
+    const url = `${API_BASE_URL}/radar/triggers/history?${params.toString()}`;
+    const response = await fetch(url);
+    if (!response.ok) {
+      throw new Error(`radar-service ${response.status}`);
+    }
+    const payload = await response.json();
+    triggerTimelineItems.value = payload.items || [];
+  } catch (err) {
+    triggerTimelineError.value = err?.message || "api-gateway 連線失敗";
+    addErrorLog("radar/triggers/history timeline", err);
+  } finally {
+    triggerTimelineLoading.value = false;
   }
 };
 
@@ -711,6 +816,7 @@ const fetchAll = async () => {
     fetchSymbolMappings(),
     fetchDecisionHistory(),
     fetchTodayTriggeredChecks(),
+    fetchTriggerTimelineHistory(),
     fetchOutcomeAnalytics(),
   ]);
   await fetchOutcomes();
@@ -744,15 +850,15 @@ onMounted(() => {
 
     <div class="decision-status-banner" :class="todayModeClass">
       <div class="banner-left">
-        <p class="banner-title">Today｜戰情室決策狀態</p>
+        <p class="banner-title">TODAY｜System Decision Status</p>
         <div class="banner-pills">
           <span class="status-pill" :class="todayModeClass">{{ todayMode }}</span>
           <span class="status-pill" :class="todayDecisionClass">{{ todayDecision }}</span>
         </div>
         <p class="banner-note" v-if="todayDecision === 'NO_ACTION'">
-          NO_ACTION 為正常狀態，代表今日無需動作。
+          NO_ACTION 為系統狀態之一。
         </p>
-        <p class="banner-note" v-else>此處僅顯示系統輸出，不提供買賣建議。</p>
+        <p class="banner-note" v-else>此處僅顯示系統狀態，不提供行動建議。</p>
       </div>
       <div class="banner-right">
         <div class="banner-meta">
@@ -769,18 +875,18 @@ onMounted(() => {
         <div class="today-card">
           <div class="today-card-header">
             <div>
-              <p class="section-title">Today Decision</p>
-              <p class="today-subtitle">僅供狀態檢視，不提供買賣建議。</p>
+              <p class="section-title">Decision Status</p>
+              <p class="today-subtitle">此為系統狀態顯示，非行動建議。</p>
             </div>
             <span class="badge">radar-service</span>
           </div>
           <div class="today-kv">
             <div class="kv">
-              <span class="kv-label">Mode</span>
+              <span class="kv-label">System Status</span>
               <span class="kv-value" :class="todayModeClass">{{ todayMode }}</span>
             </div>
             <div class="kv">
-              <span class="kv-label">Decision</span>
+              <span class="kv-label">Action Permission</span>
               <span class="kv-value" :class="todayDecisionClass">{{ todayDecision }}</span>
               <span class="kv-note">{{ todayDecisionNote }}</span>
             </div>
@@ -940,6 +1046,100 @@ onMounted(() => {
               <span class="today-trigger-value mono">{{ formatObservedValue(row.observed_value) }}</span>
             </p>
           </article>
+        </div>
+      </div>
+    </section>
+
+    <section class="panel subtle panel-observation" id="panel-trigger-timeline">
+      <div class="panel-header">
+        <h2>歷史一致性檢查（Trigger Timeline）</h2>
+        <span class="badge">radar-service</span>
+        <button class="collapse-btn" type="button" @click="togglePanel('triggersTimeline')">
+          {{ panels.triggersTimeline ? "展開" : "收合" }}
+        </button>
+      </div>
+
+      <div v-show="!panels.triggersTimeline">
+        <p class="timeline-note">本區僅描述 trigger 在過去 {{ TRIGGER_TIMELINE_DAYS }} 天是否出現，不提供推論。</p>
+        <div class="timeline-legend">
+          <span><i class="timeline-dot appeared"></i>出現</span>
+          <span><i class="timeline-dot missed"></i>未出現</span>
+        </div>
+
+        <div v-if="triggerTimelineError" class="error">
+          {{ triggerTimelineError }}
+        </div>
+        <div v-else-if="triggerTimelineLoading" class="empty">讀取中...</div>
+        <div v-else-if="triggerTimelineRows.length === 0" class="empty">歷史資料不足，無法判斷一致性。</div>
+
+        <div v-else class="timeline-groups">
+          <div class="timeline-group">
+            <p class="timeline-group-title">今日曾出現</p>
+            <div v-if="todayTimelineRows.length === 0" class="empty">今日尚無 trigger 出現紀錄。</div>
+            <article v-for="row in todayTimelineRows" :key="`today-${row.trigger_key}`" class="timeline-card">
+              <p class="timeline-line">
+                <span class="timeline-label">trigger_key</span>
+                <span class="timeline-value mono">{{ row.trigger_key }}</span>
+              </p>
+              <p class="timeline-line">
+                <span class="timeline-label">過去 {{ TRIGGER_TIMELINE_DAYS }} 天出現次數</span>
+                <span class="timeline-value">{{ row.count }}</span>
+              </p>
+              <p class="timeline-line">
+                <span class="timeline-label">連續出現</span>
+                <span class="timeline-value">{{ row.insufficient_history ? "-" : row.has_consecutive }}</span>
+              </p>
+              <p class="timeline-line">
+                <span class="timeline-label">多為單日出現</span>
+                <span class="timeline-value">{{ row.insufficient_history ? "-" : row.single_day_spikes }}</span>
+              </p>
+              <p v-if="row.insufficient_history" class="timeline-insufficient">歷史資料不足，無法判斷一致性。</p>
+              <div class="timeline-track">
+                <span
+                  v-for="(hit, idx) in row.day_hits"
+                  :key="`${row.trigger_key}-${idx}`"
+                  class="timeline-dot"
+                  :class="{ appeared: hit, missed: !hit }"
+                ></span>
+              </div>
+            </article>
+          </div>
+
+          <div class="timeline-group">
+            <button class="ghost" type="button" @click="showOtherTimelineTriggers = !showOtherTimelineTriggers">
+              {{ showOtherTimelineTriggers ? "收合其他 trigger" : "展開其他 trigger" }}
+            </button>
+            <div v-if="showOtherTimelineTriggers" class="timeline-other-list">
+              <div v-if="otherTimelineRows.length === 0" class="empty">沒有其他歷史 trigger。</div>
+              <article v-for="row in otherTimelineRows" :key="`other-${row.trigger_key}`" class="timeline-card">
+                <p class="timeline-line">
+                  <span class="timeline-label">trigger_key</span>
+                  <span class="timeline-value mono">{{ row.trigger_key }}</span>
+                </p>
+                <p class="timeline-line">
+                  <span class="timeline-label">過去 {{ TRIGGER_TIMELINE_DAYS }} 天出現次數</span>
+                  <span class="timeline-value">{{ row.count }}</span>
+                </p>
+                <p class="timeline-line">
+                  <span class="timeline-label">連續出現</span>
+                  <span class="timeline-value">{{ row.insufficient_history ? "-" : row.has_consecutive }}</span>
+                </p>
+                <p class="timeline-line">
+                  <span class="timeline-label">多為單日出現</span>
+                  <span class="timeline-value">{{ row.insufficient_history ? "-" : row.single_day_spikes }}</span>
+                </p>
+                <p v-if="row.insufficient_history" class="timeline-insufficient">歷史資料不足，無法判斷一致性。</p>
+                <div class="timeline-track">
+                  <span
+                    v-for="(hit, idx) in row.day_hits"
+                    :key="`${row.trigger_key}-${idx}`"
+                    class="timeline-dot"
+                    :class="{ appeared: hit, missed: !hit }"
+                  ></span>
+                </div>
+              </article>
+            </div>
+          </div>
         </div>
       </div>
     </section>
@@ -1469,21 +1669,21 @@ h1 {
   padding: 1rem 1.25rem;
   border-radius: 18px;
   border: 1px solid rgba(148, 163, 184, 0.35);
-  background: rgba(9, 14, 28, 0.92);
-  box-shadow: 0 12px 26px rgba(5, 7, 15, 0.5);
+  background: rgba(12, 18, 32, 0.82);
+  box-shadow: 0 8px 18px rgba(5, 7, 15, 0.35);
   backdrop-filter: blur(12px);
 }
 
 .decision-status-banner.risk-on {
-  border-color: rgba(34, 197, 94, 0.55);
+  border-color: rgba(148, 163, 184, 0.32);
 }
 
 .decision-status-banner.risk-off {
-  border-color: rgba(248, 113, 113, 0.55);
+  border-color: rgba(148, 163, 184, 0.32);
 }
 
 .decision-status-banner.transition {
-  border-color: rgba(251, 191, 36, 0.55);
+  border-color: rgba(148, 163, 184, 0.32);
 }
 
 .decision-status-banner.unknown {
@@ -1492,10 +1692,11 @@ h1 {
 
 .banner-title {
   margin: 0 0 0.35rem;
-  font-size: 0.95rem;
+  font-size: 0.82rem;
   text-transform: uppercase;
-  letter-spacing: 0.14em;
-  color: #7dd3fc;
+  letter-spacing: 0.08em;
+  color: #cbd5e1;
+  font-weight: 500;
 }
 
 .banner-pills {
@@ -1508,60 +1709,48 @@ h1 {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  padding: 0.35rem 0.75rem;
+  padding: 0.3rem 0.68rem;
   border-radius: 999px;
-  border: 1px solid transparent;
-  font-size: 0.75rem;
-  font-weight: 600;
+  border: 1px solid rgba(148, 163, 184, 0.35);
+  background: rgba(148, 163, 184, 0.12);
+  color: #dbe3ee;
+  font-size: 0.72rem;
+  font-weight: 500;
   letter-spacing: 0.04em;
 }
 
 .status-pill.risk-on {
-  background: rgba(34, 197, 94, 0.2);
-  color: #86efac;
-  border-color: rgba(34, 197, 94, 0.5);
+  border-color: rgba(148, 163, 184, 0.4);
 }
 
 .status-pill.risk-off {
-  background: rgba(248, 113, 113, 0.2);
-  color: #fecaca;
-  border-color: rgba(248, 113, 113, 0.5);
+  border-color: rgba(148, 163, 184, 0.4);
 }
 
 .status-pill.transition {
-  background: rgba(251, 191, 36, 0.2);
-  color: #fde68a;
-  border-color: rgba(251, 191, 36, 0.5);
+  border-color: rgba(148, 163, 184, 0.4);
 }
 
 .status-pill.unknown {
-  background: rgba(148, 163, 184, 0.2);
-  color: #e2e8f0;
   border-color: rgba(148, 163, 184, 0.4);
 }
 
 .status-pill.decision-neutral {
-  background: rgba(56, 189, 248, 0.2);
-  color: #bae6fd;
-  border-color: rgba(56, 189, 248, 0.45);
+  border-color: rgba(148, 163, 184, 0.4);
 }
 
 .status-pill.decision-alert {
-  background: rgba(244, 63, 94, 0.2);
-  color: #fecdd3;
-  border-color: rgba(244, 63, 94, 0.45);
+  border-color: rgba(148, 163, 184, 0.4);
 }
 
 .status-pill.decision-unknown {
-  background: rgba(148, 163, 184, 0.2);
-  color: #e2e8f0;
   border-color: rgba(148, 163, 184, 0.4);
 }
 
 .banner-note {
   margin: 0.6rem 0 0;
-  color: #cbd5f5;
-  font-size: 0.85rem;
+  color: #9aa8ba;
+  font-size: 0.78rem;
 }
 
 .banner-right {
@@ -1579,9 +1768,9 @@ h1 {
 }
 
 .banner-state {
-  font-size: 0.85rem;
-  color: #bbf7d0;
-  font-weight: 600;
+  font-size: 0.78rem;
+  color: #cbd5e1;
+  font-weight: 500;
 }
 
 .banner-state.error {
@@ -1601,12 +1790,12 @@ h1 {
 
 .today-card {
   background: rgba(10, 15, 30, 0.88);
-  border: 1px solid rgba(94, 234, 212, 0.2);
+  border: 1px solid rgba(148, 163, 184, 0.2);
   border-radius: 18px;
   padding: 1.25rem;
   display: grid;
   gap: 1rem;
-  box-shadow: 0 16px 34px rgba(5, 7, 15, 0.55);
+  box-shadow: 0 12px 26px rgba(5, 7, 15, 0.4);
 }
 
 .today-card-header {
@@ -1645,29 +1834,29 @@ h1 {
 }
 
 .kv-value {
-  font-size: 0.95rem;
-  font-weight: 600;
+  font-size: 0.9rem;
+  font-weight: 500;
   color: #e2e8f0;
 }
 
 .kv-value.risk-on {
-  color: #86efac;
+  color: #e2e8f0;
 }
 
 .kv-value.risk-off {
-  color: #fecaca;
+  color: #e2e8f0;
 }
 
 .kv-value.transition {
-  color: #fde68a;
+  color: #e2e8f0;
 }
 
 .kv-value.decision-neutral {
-  color: #bae6fd;
+  color: #e2e8f0;
 }
 
 .kv-value.decision-alert {
-  color: #fecdd3;
+  color: #e2e8f0;
 }
 
 .kv-value.decision-unknown {
@@ -1676,7 +1865,7 @@ h1 {
 
 .kv-note {
   font-size: 0.7rem;
-  color: #cbd5f5;
+  color: #9aa8ba;
 }
 
 .hash-row {
@@ -2294,6 +2483,109 @@ strong {
   word-break: break-word;
 }
 
+.timeline-note {
+  margin: 0;
+  color: #94a3b8;
+  font-size: 0.78rem;
+}
+
+.timeline-legend {
+  display: flex;
+  gap: 0.8rem;
+  margin: 0.4rem 0 0.9rem;
+  color: #94a3b8;
+  font-size: 0.74rem;
+}
+
+.timeline-legend span {
+  display: inline-flex;
+  gap: 0.3rem;
+  align-items: center;
+}
+
+.timeline-legend .timeline-dot {
+  width: 0.72rem;
+  aspect-ratio: 1 / 1;
+}
+
+.timeline-groups {
+  display: grid;
+  gap: 1rem;
+}
+
+.timeline-group {
+  display: grid;
+  gap: 0.6rem;
+}
+
+.timeline-group-title {
+  margin: 0;
+  color: #cbd5e1;
+  font-size: 0.8rem;
+}
+
+.timeline-other-list {
+  display: grid;
+  gap: 0.6rem;
+}
+
+.timeline-card {
+  background: rgba(15, 23, 42, 0.72);
+  border: 1px solid rgba(148, 163, 184, 0.2);
+  border-radius: 12px;
+  padding: 0.7rem 0.8rem;
+  display: grid;
+  gap: 0.35rem;
+}
+
+.timeline-line {
+  margin: 0;
+  display: grid;
+  grid-template-columns: 10.8rem 1fr;
+  gap: 0.55rem;
+  align-items: start;
+}
+
+.timeline-label {
+  color: #93c5fd;
+  font-size: 0.74rem;
+  white-space: nowrap;
+}
+
+.timeline-value {
+  color: #e2e8f0;
+  font-size: 0.82rem;
+  line-height: 1.4;
+}
+
+.timeline-insufficient {
+  margin: 0.1rem 0 0;
+  font-size: 0.76rem;
+  color: #94a3b8;
+}
+
+.timeline-track {
+  display: grid;
+  grid-template-columns: repeat(14, minmax(0, 1fr));
+  gap: 0.2rem;
+  margin-top: 0.2rem;
+}
+
+.timeline-dot {
+  width: 100%;
+  aspect-ratio: 1 / 1;
+  border-radius: 3px;
+  border: 1px solid rgba(148, 163, 184, 0.3);
+}
+
+.timeline-dot.appeared {
+  background: rgba(148, 163, 184, 0.55);
+}
+
+.timeline-dot.missed {
+  background: rgba(15, 23, 42, 0.15);
+}
+
 .mono {
   font-family: "JetBrains Mono", "Fira Code", monospace;
   word-break: break-all;
@@ -2327,6 +2619,11 @@ strong {
   .today-trigger-line {
     grid-template-columns: 1fr;
     gap: 0.35rem;
+  }
+
+  .timeline-line {
+    grid-template-columns: 1fr;
+    gap: 0.2rem;
   }
 }
 
