@@ -899,7 +899,18 @@ onMounted(() => {
           <article v-for="item in newsItems" :key="item.id" class="signal-claim" :class="{ n1: item.tier === 'N1' }">
             <p class="signal-line">
               <span class="signal-label">主張</span>
-              <span class="signal-value">{{ item.title || "-" }}</span>
+              <span class="signal-value signal-claim-title">
+                <span>{{ item.title || "-" }}</span>
+                <a
+                  v-if="item.source_url"
+                  class="signal-source-link mono"
+                  :href="item.source_url"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                >
+                  {{ item.source_url }}
+                </a>
+              </span>
             </p>
             <p class="signal-line">
               <span class="signal-label">何時會錯</span>
@@ -2536,6 +2547,23 @@ strong {
   color: #e2e8f0;
   line-height: 1.45;
   word-break: break-word;
+}
+
+.signal-claim-title {
+  display: grid;
+  gap: 0.18rem;
+}
+
+.signal-source-link {
+  color: #7dd3fc;
+  font-size: 0.75rem;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  width: fit-content;
+}
+
+.signal-source-link:hover {
+  color: #bae6fd;
 }
 
 .holdings-grid {
