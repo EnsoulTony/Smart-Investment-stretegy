@@ -92,6 +92,62 @@ const togglePanel = (key) => {
   panels.value[key] = !panels.value[key];
 };
 
+const todayMode = computed(() => decisionPackage.value?.mode || "UNKNOWN");
+const todayDecision = computed(() => decisionPackage.value?.decision || "UNKNOWN");
+const todayInputsHash = computed(() => decisionPackage.value?.evidence?.inputs_hash || "");
+const todayStatusText = computed(() => {
+  if (decisionLoading.value) {
+    return "決策載入中";
+  }
+  if (decisionError.value) {
+    return "決策讀取失敗";
+  }
+  if (!decisionPackage.value) {
+    return "尚未取得今日決策";
+  }
+  return "今日決策已更新";
+});
+const todayModeClass = computed(() => {
+  if (todayMode.value === "RISK_ON") {
+    return "risk-on";
+  }
+  if (todayMode.value === "RISK_OFF") {
+    return "risk-off";
+  }
+  if (todayMode.value === "TRANSITION") {
+    return "transition";
+  }
+  return "unknown";
+});
+const todayDecisionClass = computed(() => {
+  if (todayDecision.value === "NO_ACTION") {
+    return "decision-neutral";
+  }
+  if (todayDecision.value === "UNKNOWN") {
+    return "decision-unknown";
+  }
+  return "decision-alert";
+});
+const todayDecisionNote = computed(() => {
+  if (todayDecision.value === "NO_ACTION") {
+    return "NO_ACTION 為正常狀態";
+  }
+  if (todayDecision.value === "UNKNOWN") {
+    return "尚未判定";
+  }
+  return "請先檢查證據";
+});
+
+const openPanelAndScroll = (key, elementId) => {
+  panels.value[key] = false;
+  requestAnimationFrame(() => {
+    const el = document.getElementById(elementId);
+    if (el) {
+      el.scrollIntoView({ behavior: "smooth", block: "start" });
+    }
+  });
+};
+
 const n1Items = computed(() => newsItems.value.filter((item) => item.tier === "N1"));
 const n3Items = computed(() => newsItems.value.filter((item) => item.tier === "N3"));
 const decisionSummary = computed(() => {
@@ -711,7 +767,95 @@ onMounted(() => {
       </div>
     </header>
 
-    <section class="panel">
+    <div class="decision-status-banner" :class="todayModeClass">
+      <div class="banner-left">
+        <p class="banner-title">Today｜戰情室決策狀態</p>
+        <div class="banner-pills">
+          <span class="status-pill" :class="todayModeClass">{{ todayMode }}</span>
+          <span class="status-pill" :class="todayDecisionClass">{{ todayDecision }}</span>
+        </div>
+        <p class="banner-note" v-if="todayDecision === 'NO_ACTION'">
+          NO_ACTION 為正常狀態，代表今日無需動作。
+        </p>
+        <p class="banner-note" v-else>此處僅顯示系統輸出，不提供買賣建議。</p>
+      </div>
+      <div class="banner-right">
+        <div class="banner-meta">
+          <span>as_of {{ asOf }}</span>
+          <span v-if="lastUpdated">更新 {{ lastUpdated }}</span>
+        </div>
+        <span class="banner-state" :class="{ error: decisionError }">{{ todayStatusText }}</span>
+        <span v-if="decisionError" class="banner-error">{{ decisionError }}</span>
+      </div>
+    </div>
+
+    <section class="today-zone">
+      <div class="today-grid">
+        <div class="today-card">
+          <div class="today-card-header">
+            <div>
+              <p class="section-title">Today Decision</p>
+              <p class="today-subtitle">僅供狀態檢視，不提供買賣建議。</p>
+            </div>
+            <span class="badge">radar-service</span>
+          </div>
+          <div class="today-kv">
+            <div class="kv">
+              <span class="kv-label">Mode</span>
+              <span class="kv-value" :class="todayModeClass">{{ todayMode }}</span>
+            </div>
+            <div class="kv">
+              <span class="kv-label">Decision</span>
+              <span class="kv-value" :class="todayDecisionClass">{{ todayDecision }}</span>
+              <span class="kv-note">{{ todayDecisionNote }}</span>
+            </div>
+            <div class="kv">
+              <span class="kv-label">N1 / N3</span>
+              <span class="kv-value mono">
+                {{ decisionPackage?.evidence?.news_context?.tiers_count?.N1 ?? "-" }} /
+                {{ decisionPackage?.evidence?.news_context?.tiers_count?.N3 ?? "-" }}
+              </span>
+            </div>
+            <div class="kv">
+              <span class="kv-label">Risk score</span>
+              <span class="kv-value mono">
+                {{ decisionPackage?.evidence?.news_context?.score_impact?.risk_off_score_added ?? "-" }}
+              </span>
+            </div>
+          </div>
+          <div class="hash-row">
+            <span class="kv-label">inputs_hash</span>
+            <span class="mono">{{ todayInputsHash || "-" }}</span>
+            <button class="ghost" type="button" @click="copyHash(todayInputsHash)" :disabled="!todayInputsHash">
+              copy
+            </button>
+          </div>
+        </div>
+
+        <div class="today-card next-step">
+          <div class="today-card-header">
+            <div>
+              <p class="section-title">Next Step Guidance</p>
+              <p class="today-subtitle">只導引查證流程，請先檢查證據。</p>
+            </div>
+          </div>
+          <div class="next-step-list">
+            <button type="button" class="step-button" @click="openPanelAndScroll('triggers', 'panel-triggers')">
+              查看觸發
+            </button>
+            <button type="button" class="step-button" @click="openPanelAndScroll('news', 'panel-news')">
+              查看 N1 證據
+            </button>
+            <button type="button" class="step-button" @click="openPanelAndScroll('decision', 'panel-decision')">
+              查看融合決策包
+            </button>
+          </div>
+          <p class="next-step-note">本區不提供任何買賣建議。</p>
+        </div>
+      </div>
+    </section>
+
+    <section class="panel" id="panel-news">
       <div class="panel-header">
         <h2>戰情室｜新聞訊號</h2>
         <span class="badge">news-service</span>
@@ -956,7 +1100,7 @@ onMounted(() => {
       </div>
     </section>
 
-    <section class="panel">
+    <section class="panel" id="panel-decision">
       <div class="panel-header">
         <h2>戰情室｜融合決策包</h2>
         <span class="badge">radar-service</span>
@@ -1252,7 +1396,7 @@ onMounted(() => {
       </div>
     </section>
     
-    <section class="panel">
+    <section class="panel" id="panel-triggers">
       <div class="panel-header">
         <h2>Trigger Timeline</h2>
         <span class="badge">radar-service</span>
@@ -1435,6 +1579,271 @@ h1 {
   padding: 1rem 1.25rem;
   display: grid;
   gap: 0.75rem;
+}
+
+.today-zone {
+  display: grid;
+  gap: 1.25rem;
+}
+
+.decision-status-banner {
+  position: sticky;
+  top: 0;
+  z-index: 8;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 1rem 1.25rem;
+  border-radius: 18px;
+  border: 1px solid rgba(148, 163, 184, 0.35);
+  background: rgba(9, 14, 28, 0.92);
+  box-shadow: 0 12px 26px rgba(5, 7, 15, 0.5);
+  backdrop-filter: blur(12px);
+}
+
+.decision-status-banner.risk-on {
+  border-color: rgba(34, 197, 94, 0.55);
+}
+
+.decision-status-banner.risk-off {
+  border-color: rgba(248, 113, 113, 0.55);
+}
+
+.decision-status-banner.transition {
+  border-color: rgba(251, 191, 36, 0.55);
+}
+
+.decision-status-banner.unknown {
+  border-color: rgba(148, 163, 184, 0.35);
+}
+
+.banner-title {
+  margin: 0 0 0.35rem;
+  font-size: 0.95rem;
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
+  color: #7dd3fc;
+}
+
+.banner-pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+}
+
+.status-pill {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0.35rem 0.75rem;
+  border-radius: 999px;
+  border: 1px solid transparent;
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+}
+
+.status-pill.risk-on {
+  background: rgba(34, 197, 94, 0.2);
+  color: #86efac;
+  border-color: rgba(34, 197, 94, 0.5);
+}
+
+.status-pill.risk-off {
+  background: rgba(248, 113, 113, 0.2);
+  color: #fecaca;
+  border-color: rgba(248, 113, 113, 0.5);
+}
+
+.status-pill.transition {
+  background: rgba(251, 191, 36, 0.2);
+  color: #fde68a;
+  border-color: rgba(251, 191, 36, 0.5);
+}
+
+.status-pill.unknown {
+  background: rgba(148, 163, 184, 0.2);
+  color: #e2e8f0;
+  border-color: rgba(148, 163, 184, 0.4);
+}
+
+.status-pill.decision-neutral {
+  background: rgba(56, 189, 248, 0.2);
+  color: #bae6fd;
+  border-color: rgba(56, 189, 248, 0.45);
+}
+
+.status-pill.decision-alert {
+  background: rgba(244, 63, 94, 0.2);
+  color: #fecdd3;
+  border-color: rgba(244, 63, 94, 0.45);
+}
+
+.status-pill.decision-unknown {
+  background: rgba(148, 163, 184, 0.2);
+  color: #e2e8f0;
+  border-color: rgba(148, 163, 184, 0.4);
+}
+
+.banner-note {
+  margin: 0.6rem 0 0;
+  color: #cbd5f5;
+  font-size: 0.85rem;
+}
+
+.banner-right {
+  display: grid;
+  justify-items: end;
+  gap: 0.35rem;
+}
+
+.banner-meta {
+  display: flex;
+  gap: 0.6rem;
+  flex-wrap: wrap;
+  font-size: 0.75rem;
+  color: #94a3b8;
+}
+
+.banner-state {
+  font-size: 0.85rem;
+  color: #bbf7d0;
+  font-weight: 600;
+}
+
+.banner-state.error {
+  color: #fca5a5;
+}
+
+.banner-error {
+  font-size: 0.75rem;
+  color: #fca5a5;
+}
+
+.today-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 1.25rem;
+}
+
+.today-card {
+  background: rgba(10, 15, 30, 0.88);
+  border: 1px solid rgba(94, 234, 212, 0.2);
+  border-radius: 18px;
+  padding: 1.25rem;
+  display: grid;
+  gap: 1rem;
+  box-shadow: 0 16px 34px rgba(5, 7, 15, 0.55);
+}
+
+.today-card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 1rem;
+}
+
+.today-subtitle {
+  margin: 0.25rem 0 0;
+  font-size: 0.8rem;
+  color: #94a3b8;
+}
+
+.today-kv {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 0.75rem;
+}
+
+.kv {
+  display: grid;
+  gap: 0.35rem;
+  background: rgba(15, 23, 42, 0.6);
+  border: 1px solid rgba(148, 163, 184, 0.2);
+  border-radius: 12px;
+  padding: 0.65rem 0.75rem;
+}
+
+.kv-label {
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-size: 0.65rem;
+  color: #94a3b8;
+}
+
+.kv-value {
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: #e2e8f0;
+}
+
+.kv-value.risk-on {
+  color: #86efac;
+}
+
+.kv-value.risk-off {
+  color: #fecaca;
+}
+
+.kv-value.transition {
+  color: #fde68a;
+}
+
+.kv-value.decision-neutral {
+  color: #bae6fd;
+}
+
+.kv-value.decision-alert {
+  color: #fecdd3;
+}
+
+.kv-value.decision-unknown {
+  color: #e2e8f0;
+}
+
+.kv-note {
+  font-size: 0.7rem;
+  color: #cbd5f5;
+}
+
+.hash-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.6rem 0.75rem;
+  border-radius: 12px;
+  background: rgba(15, 23, 42, 0.6);
+  border: 1px solid rgba(148, 163, 184, 0.2);
+}
+
+.next-step-list {
+  display: grid;
+  gap: 0.6rem;
+}
+
+.step-button {
+  border-radius: 12px;
+  padding: 0.7rem 0.9rem;
+  border: 1px solid rgba(148, 163, 184, 0.35);
+  background: rgba(15, 23, 42, 0.8);
+  color: #e2e8f0;
+  font-size: 0.9rem;
+  text-align: left;
+  cursor: pointer;
+  transition: border-color 0.2s ease, transform 0.2s ease;
+}
+
+.step-button:hover {
+  border-color: rgba(125, 211, 252, 0.7);
+  transform: translateY(-1px);
+}
+
+.next-step-note {
+  margin: 0;
+  font-size: 0.78rem;
+  color: #94a3b8;
 }
 
 .label {

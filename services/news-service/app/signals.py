@@ -7,6 +7,7 @@ import re
 import hashlib
 from typing import List, Dict, Tuple
 import os
+import logging
 import httpx
 from app.db import fetch_recent_news_signals
 
@@ -444,7 +445,11 @@ def build_signal_items(as_of: str, user_id: str = "tony") -> List[dict]:
     drafts = fetch_external_news(as_of, per_source_limit=DEFAULT_NEWS_PER_SOURCE)
     drafts.sort(key=lambda item: item.id)
     if len(drafts) < DEFAULT_TOTAL_NEWS_LIMIT:
-        db_rows = fetch_recent_news_signals(user_id=user_id, limit=DEFAULT_TOTAL_NEWS_LIMIT)
+        try:
+            db_rows = fetch_recent_news_signals(user_id=user_id, limit=DEFAULT_TOTAL_NEWS_LIMIT)
+        except Exception as exc:
+            logging.warning("fetch_recent_news_signals failed: %s", exc)
+            db_rows = []
         seen_ids = {draft.id for draft in drafts}
         for row in db_rows:
             title = row.get("title") or ""
@@ -501,7 +506,11 @@ def build_signal_items(as_of: str, user_id: str = "tony") -> List[dict]:
     items.sort(key=lambda item: (-item["score"], item["id"]))
     # Ensure at least one N1 if items exist by using recent DB N1 items.
     if items and all(item.get("tier") != "N1" for item in items):
-        db_rows = fetch_recent_news_signals(user_id=user_id, limit=DEFAULT_TOTAL_NEWS_LIMIT, tier="N1")
+        try:
+            db_rows = fetch_recent_news_signals(user_id=user_id, limit=DEFAULT_TOTAL_NEWS_LIMIT, tier="N1")
+        except Exception as exc:
+            logging.warning("fetch_recent_news_signals tier=N1 failed: %s", exc)
+            db_rows = []
         if db_rows:
             existing_ids = {item.get("id") for item in items}
             for row in db_rows:

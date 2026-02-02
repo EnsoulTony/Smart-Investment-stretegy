@@ -1,7 +1,8 @@
 """News Service 的 FastAPI 進入點。"""
 
 import os
-from fastapi import FastAPI, Query, HTTPException
+import logging
+from fastapi import FastAPI, Query
 
 from app.signals import build_signal_items
 from app.db import persist_news_signals
@@ -26,7 +27,7 @@ async def news_signals(
     try:
         persist_news_signals(user_id=user_id, as_of=as_of, source="stub", items=items)
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"persist_news_signals failed: {str(e)}")
+        logging.warning("persist_news_signals failed: %s", e)
     return {
         "schema_version": "3.0",
         "as_of": as_of,
