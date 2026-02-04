@@ -21,4 +21,5 @@ ENV SERVICE_NAME=radar-service
 
 EXPOSE 8002
 
-CMD ["sh", "-c", "uvicorn app.main:app --host 0.0.0.0 --port ${PORT}"]
+# 啟動時先執行資料庫遷移，再啟動服務
+CMD ["sh", "-c", "alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port ${PORT}"]

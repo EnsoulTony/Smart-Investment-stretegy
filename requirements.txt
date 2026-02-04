@@ -1,6 +1,6 @@
 # AI 與協作工具
-aider-chat>=0.40.0
-claude>=0.4.11
+# aider-chat>=0.40.0  # 開發工具，非必需
+# claude>=0.4.11  # 開發工具，非必需
 
 # 實用函式庫
 python-dotenv>=1.0.0

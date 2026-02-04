@@ -12,7 +12,7 @@ NEWS_SERVICE_URL = os.getenv("NEWS_SERVICE_URL", "http://news-service:8003")
 RADAR_SERVICE_URL = os.getenv("RADAR_SERVICE_URL", "http://radar-service:8002")
 CORS_ALLOW_ORIGINS = os.getenv(
     "CORS_ALLOW_ORIGINS",
-    "http://localhost:8080,http://127.0.0.1:8080",
+    "*",
 )
 
 app = FastAPI(title="API Gateway / Web BFF", version="0.1.0")

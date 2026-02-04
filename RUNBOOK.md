@@ -2,6 +2,61 @@
 
 本文件提供 VM 上的維運人員、資料與策略工程師在遇到故障時的標準作業流程（SOP），包含日常檢查、異常排查、重啟/回滾、備份與 AI 協作注意事項。
 
+## 0. 首次部署或資料庫重置
+
+**⚠️ 重要：首次啟動系統或資料庫重置後，必須執行資料庫初始化**
+
+```bash
+# 1. 啟動所有容器
+docker compose up -d
+
+# 2. 執行資料庫初始化腳本
+./scripts/init_databases.sh
+```
+
+**初始化腳本功能**：
+- 等待 PostgreSQL 完全啟動
+- 依序執行以下服務的 Alembic 遷移：
+  - **Portfolio Service**: 建立 `trades`, `positions`, `core_holdings`, `symbol_name_mappings` 等表
+  - **Radar Service**: 建立 `decision_snapshots`, `trigger_evaluations` 等表
+  - **News Service**: 建立 `news_signals` 等表
+- 驗證資料表是否成功建立
+
+**常見錯誤及解決方案**：
+
+| 錯誤訊息 | 服務 | 原因 | 解決方案 |
+| --- | --- | --- | --- |
+| `relation "trades" does not exist` | portfolio-service | 未執行遷移 | 執行 `./scripts/init_databases.sh` |
+| `relation "decision_snapshots" does not exist` | radar-service | 未執行遷移 | 執行 `./scripts/init_databases.sh` |
+| `relation "news_signals" does not exist` | news-service | 未執行遷移 | 執行 `./scripts/init_databases.sh` |
+| API 回傳 502 Bad Gateway | 任何服務 | 資料表不存在導致查詢失敗 | 執行 `./scripts/init_databases.sh` |
+| API 回傳 503 | 任何服務 | 資料表不存在或數據庫連線失敗 | 執行 `./scripts/init_databases.sh` |
+
+**手動執行遷移（逐個服務）**：
+
+```bash
+# Portfolio Service
+docker compose exec portfolio-service alembic upgrade head
+
+# Radar Service
+docker compose exec radar-service alembic upgrade head
+
+# News Service
+docker compose exec news-service alembic upgrade head
+```
+
+**驗證資料表**：
+
+```bash
+# 查看所有資料表
+docker compose exec postgres psql -U investment -d investment_db -c "\dt"
+
+# 檢查特定資料表
+docker compose exec postgres psql -U investment -d investment_db -c "\d trades"
+docker compose exec postgres psql -U investment -d investment_db -c "\d decision_snapshots"
+docker compose exec postgres psql -U investment -d investment_db -c "\d news_signals"
+```
+
 ## 1. 日常檢查清單
 
 1. `docker ps --format 'table {{.Names}}\t{{.Status}}'`（所有容器須為 healthy）

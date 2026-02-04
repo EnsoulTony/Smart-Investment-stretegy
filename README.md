@@ -109,10 +109,18 @@
 	 ```bash
 	 make docker-up
 	 ```
-4. 驗證健康檢查：
+4. **首次啟動或資料庫重置後，執行資料庫初始化**：
+	 ```bash
+	 ./scripts/init_databases.sh
+	 ```
+	 此腳本會自動執行所有服務的 Alembic 遷移，建立必要的資料表：
+	 - Portfolio Service: `trades`, `positions`, `core_holdings` 等
+	 - Radar Service: `decision_snapshots`, `trigger_evaluations` 等
+	 - News Service: `news_signals` 等
+5. 驗證健康檢查：
 	 - 前端：http://localhost:8080
 	 - API Gateway：http://localhost:8000/health
-	 - 其他服務：8001～8004 皆有 `/health`
+	 - 其他服務：8001～8006 皆有 `/health`
 
 停止並清除資源：
 ```bash

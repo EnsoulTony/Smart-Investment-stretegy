@@ -11,5 +11,9 @@ google-auth>=2.25.0,<3.0.0
 # Sprint 4+: symbol name resolver
 httpx>=0.27.0,<1.0.0
 
+# Excel 檔案讀取支援
+pandas>=2.0.0,<3.0.0
+openpyxl>=3.1.0,<4.0.0
+
 # Sprint 1-2: 資料驗證與序列化
 # 註：pydantic 版本由 fastapi 決定，避免版本衝突

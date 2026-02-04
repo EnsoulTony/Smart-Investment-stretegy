@@ -717,6 +717,8 @@ const saveCoreHoldings = async () => {
       throw new Error(`portfolio-service core_holdings ${response.status}`);
     }
     holdingsSavedAt.value = new Date().toLocaleString("zh-TW");
+    // 儲存成功後重新載入資料，確保顯示最新狀態
+    await fetchHoldings();
   } catch (err) {
     holdingsError.value = err?.message || "api-gateway 連線失敗";
     addErrorLog("portfolio/core_holdings", err);

@@ -142,10 +142,20 @@ def sync_trades(db: Session = Depends(get_db)) -> dict:
         # 輸出完整 traceback 到 logs
         logger.exception("Unhandled error in /portfolio/sync: %s", e)
         
+        # 檢查是否為 Google Sheets 相關錯誤
+        error_msg = str(e)
+        if "SpreadsheetNotFound" in str(type(e)) or "404" in error_msg:
+            error_msg = (
+                "Google Sheets 試算表找不到。請檢查：\n"
+                "1. GOOGLE_SHEET_ID 環境變數是否正確\n"
+                "2. Service Account 是否有權限存取該試算表\n"
+                "3. 或改用 POST /portfolio/sync_from_excel 端點"
+            )
+        
         # 同步失敗：回傳 500 錯誤
         raise HTTPException(
             status_code=500,
-            detail=f"同步失敗：{str(e)}"
+            detail=f"同步失敗：{error_msg}"
         )
 
 
@@ -776,3 +786,80 @@ def list_decision_outcomes(
         for row in rows
     ]
     return {"items": items}
+
+
+@app.post("/portfolio/sync_from_excel", tags=["portfolio", "excel"])
+def sync_from_excel(
+    excel_url: str = Query(..., description="Excel 檔案的 URL（支援 HTTP/HTTPS）"),
+    sheet_name: str = Query("Sheet1", description="工作表名稱"),
+    db: Session = Depends(get_db)
+) -> dict:
+    """從遠端 Excel 檔案同步交易資料到資料庫。
+    
+    此端點專門用於測試從遠端 URL 讀取 Excel 檔案的功能。
+    
+    Args:
+        excel_url: Excel 檔案的 URL
+        sheet_name: 工作表名稱（預設 "Sheet1"）
+    
+    Returns:
+        dict: 包含讀取結果的資訊
+            - status: "succeeded" | "failed"
+            - records_count: 讀取到的資料列數
+            - sample: 前 3 筆資料（供檢視）
+            - columns: 欄位名稱列表
+    
+    Raises:
+        HTTPException: 
+            - 400: URL 格式錯誤或參數無效
+            - 500: 讀取失敗（網路錯誤、檔案格式錯誤等）
+    
+    範例:
+        POST /portfolio/sync_from_excel?excel_url=https://example.com/trades.xlsx&sheet_name=trades
+    """
+    try:
+        # 驗證 URL 格式
+        if not excel_url.startswith(("http://", "https://")):
+            raise HTTPException(
+                status_code=400,
+                detail="excel_url 必須是有效的 HTTP/HTTPS URL"
+            )
+        
+        # 使用 ExcelClient 讀取遠端檔案
+        excel_client = ExcelClient(
+            source_url=excel_url,
+            sheet_name=sheet_name
+        )
+        
+        records = excel_client.fetch_trades_dicts()
+        
+        # 取得欄位名稱
+        columns = list(records[0].keys()) if records else []
+        
+        # 取樣前 3 筆資料
+        sample = records[:3] if len(records) > 0 else []
+        
+        # 使用 TradeNormalizer 驗證資料
+        normalizer = TradeNormalizer()
+        valid_trades, failed_rows = normalizer.normalize_rows(records)
+        
+        return {
+            "status": "succeeded",
+            "source_url": excel_url,
+            "sheet_name": sheet_name,
+            "records_count": len(records),
+            "valid_trades_count": len(valid_trades),
+            "failed_rows_count": len(failed_rows),
+            "columns": columns,
+            "sample": sample,
+            "message": f"成功讀取 {len(records)} 筆資料，其中 {len(valid_trades)} 筆格式正確"
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception("從 Excel URL 讀取失敗: %s", e)
+        raise HTTPException(
+            status_code=500,
+            detail=f"讀取 Excel 檔案失敗：{str(e)}"
+        )

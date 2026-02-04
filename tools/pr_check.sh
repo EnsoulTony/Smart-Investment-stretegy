@@ -416,7 +416,8 @@ echo "command: curl -s -w '\\n%{http_code}\\n%{content_type}' '$ENDPOINT'"
 API_RESPONSE_200=$(curl -s -w "\n%{http_code}\n%{content_type}" "$ENDPOINT" 2>&1 || true)
 
 # Parse response: last 2 lines are http_code and content_type
-BODY_200=$(echo "$API_RESPONSE_200" | head -n -2)
+# 使用 sed 代替 head -n -2 以支援 macOS BSD 版本
+BODY_200=$(echo "$API_RESPONSE_200" | sed '$d' | sed '$d')
 HTTP_CODE_200=$(echo "$API_RESPONSE_200" | tail -n 2 | head -n 1)
 CONTENT_TYPE_200=$(echo "$API_RESPONSE_200" | tail -n 1)
 
