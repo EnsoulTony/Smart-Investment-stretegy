@@ -78,3 +78,6 @@ htmlcov/
 # Local Docker overrides
 docker-compose.override.yml
 .venv/
+
+# MCP server config (contains API tokens)
+.mcp.json
